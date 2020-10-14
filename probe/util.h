@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-#define LPROBE_DEBUG_PRINT
+//#define LPROBE_DEBUG_PRINT
 
 #define LPROBE_UNUSED __attribute__((unused))
 

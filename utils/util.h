@@ -1,6 +1,8 @@
 #ifndef __LPROFILE_UTIL_H__
 #define __LPROFILE_UTIL_H__
 
+#include <limits.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -24,6 +26,12 @@ extern "C" {
 #else
 #define LPROFILE_DEBUG(format, ...)
 #endif /* LPROFILE_DEBUG_PRINT */
+
+#define zfree(p) do {	\
+	if (p) {			\
+		free(p);		\
+		p = NULL;		\
+	} } while (0)
 
 #ifdef __cplusplus
 }

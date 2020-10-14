@@ -1,5 +1,16 @@
 # add include path for DyninstAPI
-include_directories(${DYNINST_HEADER_DIR})
+include_directories(${DYNINST_SOURCE_DIR}/dyninstAPI/h
+		${DYNINST_SOURCE_DIR}/common/h
+		${DYNINST_SOURCE_DIR}/dynC_API/h
+		${DYNINST_SOURCE_DIR}/elf/h
+		${DYNINST_SOURCE_DIR}/instructionAPI/h
+		${DYNINST_SOURCE_DIR}/parseAPI/h
+		${DYNINST_SOURCE_DIR}/patchAPI/h
+		${DYNINST_SOURCE_DIR}/proccontrol/h
+		${DYNINST_SOURCE_DIR}/stackwalk/h
+		${DYNINST_SOURCE_DIR}/symlite/h
+		${DYNINST_SOURCE_DIR}/symtabAPI/h
+		)
 
 # add libraries searching path for DyninstAPI
 link_directories(${DYNINST_LIB_DIR})
@@ -20,8 +31,10 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -std=c++11")
 ######################### tracer ############################
 # set source files
 set(LPROFILE_SRC
+		count.cc
 		funcmap.cc
 		funcmaptest.cc
+		prof.cc
 		test.cc
 )
 

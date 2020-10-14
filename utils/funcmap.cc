@@ -121,8 +121,8 @@ void FuncMap::addFunction(const char *func)
 	funcs.push_back(funcname);
 	func_indices.insert(pair<string, unsigned int>(funcname, index));
 
-	LPROFILE_DEBUG("[%s] Function %u: %s",
-					elf_path.c_str(), index, func);
+//	LPROFILE_DEBUG("[%s] Function %u: %s",
+//					elf_path.c_str(), index, func);
 }
 
 bool FuncMap::loadFromCache(void)
