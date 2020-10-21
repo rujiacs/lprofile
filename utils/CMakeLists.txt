@@ -8,7 +8,6 @@ include_directories(${DYNINST_SOURCE_DIR}/dyninstAPI/h
 		${DYNINST_SOURCE_DIR}/patchAPI/h
 		${DYNINST_SOURCE_DIR}/proccontrol/h
 		${DYNINST_SOURCE_DIR}/stackwalk/h
-		${DYNINST_SOURCE_DIR}/symlite/h
 		${DYNINST_SOURCE_DIR}/symtabAPI/h
 		)
 
@@ -35,12 +34,13 @@ set(LPROFILE_SRC
 		funcmap.cc
 		funcmaptest.cc
 		prof.cc
+		simple.cc
 		test.cc
 )
 
 # add build target
 add_executable(lprofile ${LPROFILE_SRC})
-target_link_libraries(lprofile ${BOOST_LIBS} dyninstAPI)
+target_link_libraries(lprofile ${BOOST_LIBS} dyninstAPI parseAPI symtabAPI)
 
 install(TARGETS lprofile
 		RUNTIME DESTINATION ${LIB_INSTALL}

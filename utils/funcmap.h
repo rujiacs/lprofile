@@ -12,11 +12,12 @@
 
 #include "test.h"
 
-#define FUNCMAP_DIR "/etc/lprofile/funcmap/"
+#define FUNCMAP_DIR "/home/rujia/project/profile/lprofile/lprofile_cache/funcmap/"
 
 #define FUNC_NAME_MAX 256
 
 class BPatch_object;
+class BPatch_function;
 
 enum {
 	// Cache is up-to-date. Load directly from cache file
@@ -35,17 +36,22 @@ class FuncMap {
 		std::string elf_name;
 		std::string elf_path;
 		// BPatch_object instance for this elf
-		BPatch_object *obj;		
-		// List of monitroable functions		
+		BPatch_object *obj;
+		// List of monitroable functions
 		std::vector<std::string> funcs;
 		// Map between functions' name and index
 		std::map<std::string, unsigned int> func_indices;
+		// wrapper source file
+		FILE *wrapper;
 
 		// check the state of cache file
 		uint8_t checkState(void);
 
 		// add funtion to function map
-		void addFunction(const char *func);
+		unsigned addFunction(const char *func);
+
+		// generate wrapper
+		void generateWrapper(BPatch_function *func, unsigned index);
 
 		// build directories for cache file
 		bool buildDir(void);

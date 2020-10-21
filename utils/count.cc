@@ -33,7 +33,7 @@ bool CountUtil::getTargetFuncs(void)
 	getUserObjs(objs);
 
 	for (unsigned i = 0; i < objs.size(); i++) {
-		FuncMap fmap(objs[i]);
+		FuncMap fmap(objs[i]->pathName().c_str());
 
 		LPROFILE_INFO("Load function map for %s",
 						objs[i]->pathName().c_str());
@@ -390,6 +390,7 @@ void CountUtil::buildInitArgs(
 				LPROFILE_UNUSED vector<BPatch_snippet *> &args)
 {
 }
+
 #else
 void CountUtil::buildInitArgs(vector<BPatch_snippet *> &args)
 {

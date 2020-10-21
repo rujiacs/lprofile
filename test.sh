@@ -10,4 +10,6 @@ export DYNINST_DEBUG_RELOC=1
 bin=/home/rujia/project/profile/lprofile/build/utils/lprofile
 testapp=/home/rujia/project/profile/lprofile/test/test
 
-${bin} prof -f func ${testapp}
+#${bin} prof -f func ${testapp}
+#${bin} simple
+${bin} funcmap -e ${testapp} -f

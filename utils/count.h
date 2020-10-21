@@ -86,11 +86,16 @@ class CountUtil {
 		/* Parse command-line options */
 		bool parseOption(int opt, char *optarg);
 
+		std::vector<TargetFunc>& getTargetLists(void) { return target_funcs; }
+
 		/* Set address space (for convenience) */
 		void setAS(BPatch_addressSpace *addr) { as = addr; };
 
 		/* Get function pattern */
 		const std::string getPattern(void) { return pattern; };
+		/* Set function pattern */
+		void setPattern(const char *str) { pattern = str; }
+
 		/* Get init function */
 		BPatch_function *getInit(void) { return func_init; };
 
@@ -108,6 +113,10 @@ class CountUtil {
 		/* Insert exit functions into target program */
 		bool insertExit(std::string filter);
 
+		/* Find a function in 'obj' based on its 'name' */
+		BPatch_function *findFunction(BPatch_object *obj,
+						std::string name);
+
 		/* Construct the argument list for init function */
 		void buildInitArgs(std::vector<BPatch_snippet *> &args);
 	private:
@@ -118,10 +127,6 @@ class CountUtil {
 		/* Match the 'pattern' and the functions in 'fmap'. */
 		void matchFuncs(BPatch_object *obj, FuncMap *fmap,
 						std::string pattern);
-
-		/* Find a function in 'obj' based on its 'name' */
-		BPatch_function *findFunction(BPatch_object *obj,
-						std::string name);
 
 		/* Calculate range of target function indices */
 		void calculateRange(void);

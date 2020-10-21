@@ -15,6 +15,7 @@
 #include "BPatch_binaryEdit.h"
 #include "BPatch_function.h"
 #include "BPatch_module.h"
+#include "BPatch_type.h"
 
 #include "util.h"
 #include "funcmap.h"
@@ -36,7 +37,8 @@ static void initSkipList(void)
 }
 
 FuncMap::FuncMap(std::string name, std::string path) :
-		obj(NULL)
+		obj(NULL),
+		wrapper(NULL)
 {
 	elf_path = path;
 	elf_name = name;
@@ -47,7 +49,8 @@ FuncMap::FuncMap(std::string name, std::string path) :
 
 FuncMap::FuncMap(string path) :
 		elf_path(path),
-		obj(NULL)
+		obj(NULL),
+		wrapper(NULL)
 {
 	size_t pos = 0;
 
@@ -59,7 +62,8 @@ FuncMap::FuncMap(string path) :
 }
 
 FuncMap::FuncMap(BPatch_object *target) :
-		obj(target)
+		obj(target),
+		wrapper(NULL)
 {
 	elf_path = obj->pathName();
 	elf_name = obj->name();
@@ -104,18 +108,18 @@ uint8_t FuncMap::checkState(void)
 	}
 }
 
-void FuncMap::addFunction(const char *func)
+unsigned FuncMap::addFunction(const char *func)
 {
 	string funcname(func);
 	unsigned index = 0;
 
 	// check if exists
 	if (func_indices.count(funcname))
-		return;
+		return UINT_MAX;
 
 	// filter
-	if (skiplist.count(func))
-		return;
+	if (skiplist.count(funcname))
+		return UINT_MAX;
 
 	index = funcs.size();
 	funcs.push_back(funcname);
@@ -123,6 +127,38 @@ void FuncMap::addFunction(const char *func)
 
 //	LPROFILE_DEBUG("[%s] Function %u: %s",
 //					elf_path.c_str(), index, func);
+	return index;
+}
+
+void FuncMap::generateWrapper(BPatch_function *func, unsigned index)
+{
+	vector<BPatch_localVar *> *params = NULL;
+	bool has_ret = true;
+	int i = 0;
+
+	if (!wrapper) {
+		string wrap_file(FUNCMAP_DIR);
+		wrap_file += "LPROFILE_WRAP_" + elf_name + ".c";
+		LPROFILE_DEBUG("Wrap file %s", wrap_file.c_str());
+
+		wrapper = fopen(wrap_file.c_str(), "w");
+		if (!wrapper) {
+			LPROFILE_ERROR("Failed to open wrapper file %s",
+							wrap_file.c_str());
+			return;
+		}
+	}
+
+	params = func->getParams();
+	if (func->getReturnType()->getDataClass()
+					== BPatch_dataNullType)
+		has_ret = false;
+	else
+		has_ret = true;
+	LPROFILE_DEBUG("Function %s: %lu params, return %d, %u",
+					func->getName().c_str(),
+					params->size(), has_ret,
+					func->getReturnType()->getDataClass());
 }
 
 bool FuncMap::loadFromCache(void)
@@ -197,6 +233,7 @@ bool FuncMap::updateCache(void)
 		return false;
 	}
 
+	LPROFILE_INFO("Update cache %s", cachefile.c_str());
 	for (unsigned i = 0; i < funcs.size(); i++)
 		fprintf(file, "%s\n", funcs[i].c_str());
 	return true;
@@ -225,8 +262,12 @@ bool FuncMap::loadFromELF(void)
 		}
 
 		// generate function map		
-		for (unsigned i = 0; i < funclist.size(); i++)
-			addFunction(funclist[i]->getName().c_str());
+		for (unsigned i = 0; i < funclist.size(); i++) {
+			unsigned func_idx = addFunction(funclist[i]->getName().c_str());
+
+			if (func_idx != UINT_MAX)
+				generateWrapper(funclist[i], func_idx);
+		}
 	}
 	// get the function list directly from BPatch_object
 	else {
@@ -234,11 +275,14 @@ bool FuncMap::loadFromELF(void)
 
 		obj->modules(mods);
 		for (unsigned i = 0; i < mods.size(); i++) {
-			BPatch_Vector<BPatch_function *> funcs;
+			BPatch_Vector<BPatch_function *> tmp_funcs;
 
-			mods[i]->getProcedures(funcs, false);
-			for (unsigned j = 0; j < funcs.size(); j++) {
-				addFunction(funcs[j]->getName().c_str());
+			mods[i]->getProcedures(tmp_funcs, false);
+			for (unsigned j = 0; j < tmp_funcs.size(); j++) {
+				unsigned func_idx = addFunction(tmp_funcs[i]->getName().c_str());
+
+				if (func_idx != UINT_MAX)
+					generateWrapper(tmp_funcs[i], func_idx);
 			}
 		}
 	}
@@ -292,9 +336,15 @@ unsigned FuncMap::getFunctionID(const char *func)
 
 void FuncMap::printAll(void)
 {
-	map<string, unsigned>::iterator iter;
+//	map<string, unsigned>::iterator iter;
+//
+//	for (iter = func_indices.begin(); iter != func_indices.end(); iter++)
+//		LPROFILE_INFO("FUNC[%u]: %s", iter->second, iter->first.c_str());
+//	LPROFILE_INFO("Total %lu functions", func_indices.size());
+	size_t i = 0;
 
-	for (iter = func_indices.begin(); iter != func_indices.end(); iter++)
-		LPROFILE_INFO("FUNC[%u]: %s", iter->second, iter->first.c_str());
-	LPROFILE_INFO("Total %lu functions", func_indices.size());
+	for (i = 0; i < funcs.size(); i++) {
+		LPROFILE_INFO("FUNC[%lu]: %s", i, funcs[i].c_str());
+	}
+	LPROFILE_INFO("Total %lu functions", funcs.size());
 }

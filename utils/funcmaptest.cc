@@ -92,7 +92,7 @@ bool FuncMapTest::parseArgs(int argc, char **argv)
 
 bool FuncMapTest::process(void)
 {
-	funcmap->printAll();
+//	funcmap->printAll();
 	return true;
 }
 
