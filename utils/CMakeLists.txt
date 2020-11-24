@@ -12,7 +12,10 @@ include_directories(${DYNINST_SOURCE_DIR}/dyninstAPI/h
 		)
 
 # add libraries searching path for DyninstAPI
-link_directories(${DYNINST_LIB_DIR})
+link_directories(${DYNINST_BINARY_DIR}/dyninstAPI
+		${DYNINST_BINARY_DIR}/symtabAPI
+		${DYNINST_BINARY_DIR}/parseAPI
+		)
 
 ####################### Boost ###########################
 # Set list of Boost libraries

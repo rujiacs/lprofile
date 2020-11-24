@@ -3,7 +3,7 @@
 #include <stdlib.h>
 
 #include "util.h"
-#include "tracer.h"
+//#include "tracer.h"
 #include "funcmap.h"
 #include "prof.h"
 #include "simple.h"
