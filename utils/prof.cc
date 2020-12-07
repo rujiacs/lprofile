@@ -28,32 +28,40 @@ Test *ProfTest::construct(void)
 
 ProfTest::ProfTest(void)
 {
+	mode = LPROFILE_MODE_PROC;
 }
 
 ProfTest::~ProfTest(void)
 {
-	zfree(muttee_argv);
+	if (mode == LPROFILE_MODE_PROC)
+		zfree(muttee_argv);
 }
 
 bool ProfTest::init(void)
 {
-	LPROFILE_DEBUG("create process %s, %d args",
-					muttee_bin.c_str(), muttee_argc);
-	int i = 0;
+	if (mode == LPROFILE_MODE_PROC) {	
+		LPROFILE_DEBUG("create process %s, %d args",
+						muttee_bin.c_str(), muttee_argc);
 
-	for (i = 0; i < muttee_argc; i++)
-		LPROFILE_DEBUG("arg[%d] = %s", i, muttee_argv[i]);
-
-	LPROFILE_DEBUG("process creating");
-	proc = bpatch.processCreate(muttee_bin.c_str(), muttee_argv);
-	if (!proc) {
-		LPROFILE_ERROR("Failed to create process for muttee");
-		return false;
+		LPROFILE_DEBUG("process creating");
+		as = bpatch.processCreate(
+						muttee_bin.c_str(), muttee_argv);
+		if (!as) {
+			LPROFILE_ERROR("Failed to create process for muttee");
+			return false;
+		}
 	}
-	LPROFILE_DEBUG("process created");
-
+	else {
+		LPROFILE_DEBUG("Open binary file %s",
+						muttee_bin.c_str());
+		as = bpatch.openBinary(muttee_bin.c_str());
+		if (!as) {
+			LPROFILE_ERROR("Failed tp open elf file");
+			return false;
+		}
+	}
 	/* init CountUtil */
-	count.setAS(proc);
+	count.setAS(as);
 
 	/* find target functions */
 	if (!count.getTargetFuncs()) {
@@ -69,7 +77,8 @@ void ProfTest::staticUsage(void)
 	fprintf(stdout, "./lprofile %s -h\t\tShow the usage.\n",
 					PROF_CMD);
 	fprintf(stdout, "./lprofile %s [OPTIONS] <muttee> [<muttee_arg>]\n"
-					"OPTIONS:\n%s\n",
+					"OPTIONS:\n"
+					"\t-w output file (and path)\n%s\n",
 					PROF_CMD, CountUtil::getUsageStr().c_str());
 }
 
@@ -77,10 +86,14 @@ bool ProfTest::parseArgs(int argc, char **argv)
 {
 	int c;
 	char buf[64] = {'\0'};
-	string optstr = CountUtil::getOptStr() + "h";
+	string optstr = CountUtil::getOptStr() + "w:h";
 
 	while ((c = getopt(argc, argv, optstr.c_str())) != -1) {
 		switch(c) {
+			case 'w':
+				mode = LPROFILE_MODE_EDIT;
+				output = optarg;
+				break;
 			case 'h':
 				staticUsage();
 				exit(0);
@@ -107,21 +120,26 @@ bool ProfTest::parseArgs(int argc, char **argv)
 	}
 	LPROFILE_DEBUG("Muttee %s", muttee_bin.c_str());
 
-//	argc--;
-//	argv++;
+	if (mode == LPROFILE_MODE_EDIT) {
+		muttee_argv = NULL;
+		muttee_argc = 0;
+		return true;
+	}
+
 	muttee_argc = argc;
-	if (muttee_argc > 0) {
-		muttee_argv = (const char **)malloc(sizeof(char*) * (muttee_argc+1));
+
+	if (argc > 0) {
+		muttee_argv = (const char **)malloc(sizeof(char*) * (argc+1));
 		if (!muttee_argv) {
 			LPROFILE_ERROR("Failed to allocate memory for muttee_argv");
 			return false;
 		}
 
-		for (c = 0; c < muttee_argc; c++) {
+		for (c = 0; c < argc; c++) {
 			muttee_argv[c] = argv[c];
 			LPROFILE_DEBUG("Muttee argv[%d]=%s", c, muttee_argv[c]);
 		}
-		muttee_argv[muttee_argc] = NULL;
+		muttee_argv[argc] = NULL;
 	}
 	else
 		muttee_argv = NULL;
@@ -211,27 +229,34 @@ bool ProfTest::process(void)
 		return false;
 	}
 
-	// start the muttee
-	proc->continueExecution();
+	if (mode == LPROFILE_MODE_PROC) {
+		BPatch_process *proc = (BPatch_process *)as;
 
-	// wait for the termination of muttee
-	while (!proc->isTerminated()){
-		bpatch.waitForStatusChange();
+		// start the muttee
+		proc->continueExecution();
+
+		// wait for the termination of muttee
+		while (!proc->isTerminated()){
+			bpatch.waitForStatusChange();
+		}
+
+		if (proc->terminationStatus() == ExitedNormally) {
+			LPROFILE_INFO("Muttee exited with code %d", proc->getExitCode());
+		} else if (proc->terminationStatus() == ExitedViaSignal)  {
+			LPROFILE_INFO("!!! Muttee exited with signal %d",
+							proc->getExitSignal());
+		} else {
+			LPROFILE_INFO("Unknown application exit");
+		}
 	}
+	else {
+		BPatch_binaryEdit *edit = (BPatch_binaryEdit *)as;	
 
-	if (proc->terminationStatus() == ExitedNormally) {
-		LPROFILE_INFO("Muttee exited with code %d", proc->getExitCode());
-	} else if (proc->terminationStatus() == ExitedViaSignal)  {
-		LPROFILE_INFO("!!! Muttee exited with signal %d", proc->getExitSignal());
-	} else {
-		LPROFILE_INFO("Unknown application exit");
+		if (!edit->writeFile(output.c_str())) {
+			LPROFILE_ERROR("Failed to write new file %s",
+								output.c_str());
+			return false;
+		}
 	}
-
-//	// write to file
-//	if (!editor->writeFile(output.c_str())) {
-//		LPROFILE_ERROR("Failed to write new file %s",
-//						output.c_str());
-//		return false;
-//	}
 	return true;
 }

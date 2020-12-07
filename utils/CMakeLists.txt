@@ -37,6 +37,8 @@ set(LPROFILE_SRC
 		funcmap.cc
 		funcmaptest.cc
 		prof.cc
+		simple.cc
+		replace.cc
 		test.cc
 		wrap.cc
 )

@@ -67,6 +67,7 @@ class FuncMap {
 
 		std::string generateWrapDef(unsigned index, unsigned type,
 						bool is_proto, unsigned nb_params, bool has_ret);
+		std::string generateWrapParam(bool is_proto, unsigned nb_params);
 		
 		bool compileWrapper(void);
 

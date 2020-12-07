@@ -179,7 +179,7 @@ std::string FuncMap::generateWrapDef(
 {
 	string funcname;
 
-	funcname = FuncMap::getWrapSymbolName(index, type) + "(";
+	funcname = FuncMap::getWrapSymbolName(index, type);
 
 	if (is_proto) {
 		if (has_ret)
@@ -188,16 +188,24 @@ std::string FuncMap::generateWrapDef(
 			funcname = "void " + funcname;
 	}
 
+	funcname += generateWrapParam(is_proto, nb_params);
+	return funcname;
+}
+
+std::string FuncMap::generateWrapParam(bool is_proto, unsigned nb_params) {
+	string params;
+
+	params = "(";
 	for (unsigned i = 0; i < nb_params; i++) {
 		if (i > 0)
-			funcname += ", ";
+			params += ", ";
 		if (is_proto)
-			funcname += "void *p" + to_string(i);
+			params += "void *p" + to_string(i);
 		else
-			funcname += "p" + to_string(i);
+			params += "p" + to_string(i);
 	}
-	funcname += ")";
-	return funcname;
+	params += ")";
+	return params;
 }
 
 bool FuncMap::generateWrapper(BPatch_function *func, unsigned index)
@@ -206,8 +214,6 @@ bool FuncMap::generateWrapper(BPatch_function *func, unsigned index)
 	bool has_ret = true;
 	unsigned i = 0;
 	string tmpstr;
-
-	LPROFILE_DEBUG("Generate wrapper file");
 
 	if (!wrapper) {
 		string wrap_file;
@@ -233,11 +239,14 @@ bool FuncMap::generateWrapper(BPatch_function *func, unsigned index)
 		has_ret = false;
 	else
 		has_ret = true;
-	LPROFILE_DEBUG("Function %s: %lu params, return %u",
-					func->getName().c_str(),
-					params->size(), has_ret);
 
 	// generate an empty symbol hook_funcX as a hook
+	if (has_ret)
+		tmpstr = "void *";
+	else
+		tmpstr = "void ";
+//	tmpstr += generateWrapParam(true, params->size()) + ";\n";
+
 	tmpstr = generateWrapDef(index, FUNCMAP_SYMBOL_HOOK, true,
 					params->size(), has_ret) + ";\n";
 
@@ -255,10 +264,10 @@ bool FuncMap::generateWrapper(BPatch_function *func, unsigned index)
 	if (has_ret)
 		tmpstr += "\tvoid *ret;\n";
 
-	tmpstr += "\tfprintf(stdout, \"enter " + to_string(index) + "\\n\");\n";
-//	tmpstr += "\t" + string(FUNC_PRE);
-//	tmpstr += "(" + to_string(index) + ");\n";
+	tmpstr += "\t" + string(FUNC_PRE);
+	tmpstr += "(" + to_string(index) + ");\n";
 
+#if 0
 	if (has_ret)
 		tmpstr += "\tret = ";
 	else
@@ -266,9 +275,13 @@ bool FuncMap::generateWrapper(BPatch_function *func, unsigned index)
 
 	tmpstr += generateWrapDef(index, FUNCMAP_SYMBOL_HOOK, false,
 					params->size(), has_ret) + ";\n";
-
-	tmpstr += "\tfprintf(stdout, \"exit " + to_string(index) + "\\n\");\n";
-//	tmpstr += "\t" + string(FUNC_POST) + "(" + to_string(index) + ");\n";
+#else
+	if (has_ret)
+		tmpstr += "\tret = 0;\n";
+	tmpstr += "\tfprintf(stdout, \"wrap func" + to_string(index) + " :"
+			+ func->getName() + "\\n\");\n";
+#endif
+	tmpstr += "\t" + string(FUNC_POST) + "(" + to_string(index) + ");\n";
 
 	if (has_ret)
 		tmpstr += "\treturn ret;\n";
@@ -291,8 +304,7 @@ bool FuncMap::compileWrapper(void)
 
 		srcfile = getWrapFilePath(elf_name, FUNCMAP_FILE_SRC);
 		libfile = getWrapFilePath(elf_name, FUNCMAP_FILE_LIB);
-//		cmd = "gcc -g -o " + libfile + " -shared -fPIC " + srcfile + " -lprobe";
-		cmd = "gcc -g -o " + libfile + " -shared -fPIC " + srcfile;
+		cmd = "gcc -g -o " + libfile + " -shared -fPIC " + srcfile + " -lprobe";
 
 		ret = system(cmd.c_str());
 		LPROFILE_DEBUG("CMD %s, ret %d", cmd.c_str(), ret);

@@ -1,5 +1,5 @@
-#ifndef __LPROFILE_PROF_H__
-#define __LPROFILE_PROF_H__
+#ifndef __LPROFILE_REPLACE_H__
+#define __LPROFILE_REPLACE_H__
 
 #include <vector>
 #include <string>
@@ -9,27 +9,29 @@
 #include "test.h"
 
 class BPatch_process;
-class BPatch_binaryEdit;
-#define PROF_CMD "prof"
 
-class ProfTest: public Test {
+#define REPLACE_CMD "replace"
+
+class BPatch_function;
+class BPatch_object;
+class TargetFunc;
+
+class ReplaceTest: public Test {
 	private:
 		BPatch_addressSpace *as;
-
 		std::string muttee_bin;
-		// for binary editor
-		std::string output;
+		unsigned int mode;
 
-		// for process
 		const char **muttee_argv;
 		int muttee_argc;
 
-		unsigned int mode;
+		std::string output;
+
 		CountUtil count;
 
 	public:
-		ProfTest(void);
-		~ProfTest(void);
+		ReplaceTest(void);
+		~ReplaceTest(void);
 
 		static void staticUsage(void);
 		static Test *construct(void);
@@ -39,10 +41,21 @@ class ProfTest: public Test {
 		void destroy(void) {};
 
 	private:
-#ifndef USE_FUNCCNT
-		bool insertInit(void);
-#endif
+
+		void handleElf(std::string elf, funclist_t &targets);
+		void handleFunction(BPatch_object *libwrap, TargetFunc *func);
 };
 
 
-#endif /* __LPROFILE_PROF_H__ */
+
+
+
+
+
+
+
+
+
+
+
+#endif

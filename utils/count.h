@@ -17,6 +17,11 @@ class BPatch_snippet;
 
 class FuncMap;
 
+enum {
+	LPROFILE_MODE_PROC = 0,
+	LPROFILE_MODE_EDIT,
+};
+
 #define USE_FUNCCNT
 
 #define LIBCNT "/home/jr/profile/lprofile/build/probe/libprobe.so"
@@ -91,6 +96,7 @@ class CountUtil {
 		/* Parse command-line options */
 		bool parseOption(int opt, char *optarg);
 
+		std::vector<TargetFunc> &getTargets(void) { return target_funcs; }
 		elfmap_t& getTargetLists(void) { return elf_targets; }
 
 		/* Set address space (for convenience) */
