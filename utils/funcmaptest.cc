@@ -25,7 +25,7 @@ Test *FuncMapTest::construct(void)
 
 bool FuncMapTest::init(void)
 {
-	FuncMap *fmap = new FuncMap(elf_path);
+	FuncMap *fmap = new FuncMap(elf_path, false);
 
 	if (!fmap) {
 		LPROFILE_ERROR("Failed to create FuncMap instance");

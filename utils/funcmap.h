@@ -12,7 +12,8 @@
 
 #include "test.h"
 
-#define FUNCMAP_DIR "/home/rujia/project/profile/lprofile/lprofile_cache/funcmap/"
+#define FUNCMAP_DIR "/home/jr/profile/lprofile/lprofile_cache/funcmap/"
+#define FUNCMAP_PREFIX "LPROFILE_WRAP_";
 
 #define FUNC_NAME_MAX 256
 
@@ -30,6 +31,16 @@ enum {
 	FUNCMAP_STATE_ECACHE,
 };
 
+enum {
+	FUNCMAP_SYMBOL_HOOK = 0,
+	FUNCMAP_SYMBOL_WRAP
+};
+
+enum {
+	FUNCMAP_FILE_SRC = 0,
+	FUNCMAP_FILE_LIB
+};
+
 class FuncMap {
 	private:
 		// The name (and path) of execuable/library
@@ -43,6 +54,7 @@ class FuncMap {
 		std::map<std::string, unsigned int> func_indices;
 		// wrapper source file
 		FILE *wrapper;
+		bool is_wrap;
 
 		// check the state of cache file
 		uint8_t checkState(void);
@@ -51,7 +63,12 @@ class FuncMap {
 		unsigned addFunction(const char *func);
 
 		// generate wrapper
-		void generateWrapper(BPatch_function *func, unsigned index);
+		bool generateWrapper(BPatch_function *func, unsigned index);
+
+		std::string generateWrapDef(unsigned index, unsigned type,
+						bool is_proto, unsigned nb_params, bool has_ret);
+		
+		bool compileWrapper(void);
 
 		// build directories for cache file
 		bool buildDir(void);
@@ -65,9 +82,10 @@ class FuncMap {
 		bool updateCache(void);
 
 	public:
-		FuncMap(std::string name, std::string path);
-		FuncMap(std::string path);
-		FuncMap(BPatch_object *target);
+		FuncMap(std::string name, std::string path, bool wrap);
+		FuncMap(std::string path, bool wrap);
+		FuncMap(BPatch_object *target, bool wrap);
+		~FuncMap(void);
 
 		/* load function map
 		 * @param force_update
@@ -82,6 +100,9 @@ class FuncMap {
 
 		// print all functions
 		void printAll(void);
+
+		static std::string getWrapFilePath(std::string elf, unsigned type);
+		static std::string getWrapSymbolName(unsigned index, unsigned type);
 };
 
 #define FUNCMAP_CMD "funcmap"

@@ -21,27 +21,28 @@ TargetFunc::TargetFunc(void) :
 {
 }
 
-TargetFunc::TargetFunc(BPatch_function *f, unsigned int i) :
-		func(f), index(i)
+TargetFunc::TargetFunc(BPatch_function *f, unsigned int i, string e) :
+		func(f), index(i), elf(e)
 {
 }
 
-bool CountUtil::getTargetFuncs(void)
+bool CountUtil::getTargetFuncs(bool is_wrap)
 {
 	BPatch_Vector<BPatch_object *> objs;
 
 	getUserObjs(objs);
 
 	for (unsigned i = 0; i < objs.size(); i++) {
-		FuncMap fmap(objs[i]->pathName().c_str());
+		FuncMap fmap(objs[i]->pathName().c_str(), is_wrap);
 
 		LPROFILE_INFO("Load function map for %s",
 						objs[i]->pathName().c_str());
-		if (!fmap.load(false)) {
+		if (!fmap.load(true)) {
 			LPROFILE_ERROR("Failed to load function map for %s",
 							objs[i]->pathName().c_str());
 			return false;
 		}
+
 		matchFuncs(objs[i], &fmap, pattern);
 	}
 
@@ -55,9 +56,22 @@ bool CountUtil::getTargetFuncs(void)
 	return true;
 }
 
-void CountUtil::addTargetFunc(BPatch_function *func, unsigned idx)
+void CountUtil::addTargetFunc(BPatch_function *func, unsigned idx, std::string obj)
 {
-	target_funcs.push_back(TargetFunc(func, idx));
+	elfmap_t::iterator it;
+
+	it = elf_targets.find(obj);
+	if (it == elf_targets.end()) {
+		std::pair<elfmap_t::iterator, bool> ret;
+
+		ret = elf_targets.insert(std::pair<std::string, funclist_t>(obj,
+											std::vector<TargetFunc*>()));
+		it = ret.first;
+		LPROFILE_DEBUG("new target elf %s", obj.c_str());
+	}
+
+	target_funcs.push_back(TargetFunc(func, idx, obj));
+	it->second.push_back(&(target_funcs.back()));
 }
 
 void CountUtil::matchFuncs(BPatch_object *obj,
@@ -77,15 +91,31 @@ void CountUtil::matchFuncs(BPatch_object *obj,
 			continue;
 		}
 
-		target_funcs.push_back(TargetFunc(tfuncs[j], index));
-		LPROFILE_INFO("Target function %s:%s, ID %u",
-						obj->name().c_str(),
-						tfuncs[j]->getName().c_str(), index);
+		addTargetFunc(tfuncs[j], index, obj->name());
+	}
+
+	elfmap_t::iterator it;
+	for (it = elf_targets.begin(); it != elf_targets.end(); it++) {
+		unsigned j = 0;
+
+		for (j = 0; j < it->second.size(); j++) {
+			TargetFunc *pf = it->second[j];
+
+			LPROFILE_INFO("Target function %s:%s(%s), ID %u",
+							it->first.c_str(),
+							pf->func->getName().c_str(),
+							pf->elf.c_str(), pf->index);
+		}
 	}
 }
 
 #define OSLIBPATH_PREFIX "/lib/"
-#define DYNINSTLIB_PREFIX "/home/rujia/project/profile/lprofile/build/lprofile/dyninst/lib/"
+#define DYNINSTLIB_PREFIX "/home/jr/profile/lprofile/build/lprofile/dyninst/lib/"
+
+const static char *skiplib[] = {
+	"libpapi", "libpfm", NULL
+};
+
 void CountUtil::getUserObjs(BPatch_Vector<BPatch_object *> &objs)
 {
 	BPatch_object *obj = NULL;
@@ -105,7 +135,24 @@ void CountUtil::getUserObjs(BPatch_Vector<BPatch_object *> &objs)
 			LPROFILE_INFO("Skip object %s", obj->name().c_str());
 			continue;
 		}
-		objs.push_back(obj);
+
+		bool is_skip = false;
+
+		for(unsigned j = 0; ; j++) {
+			const char *str = skiplib[j];
+
+			if (!str)
+				break;
+
+			if (obj->name().find(str) != std::string::npos) {
+				is_skip = true;
+				LPROFILE_INFO("Skip object %s", path.c_str());
+				break;
+			}
+		}
+		if (!is_skip) {
+			objs.push_back(obj);
+		}
 	}
 }
 

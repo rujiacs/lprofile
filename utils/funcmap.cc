@@ -19,6 +19,7 @@
 
 #include "util.h"
 #include "funcmap.h"
+#include "count.h"
 
 using namespace std;
 using namespace Dyninst;
@@ -36,19 +37,21 @@ static void initSkipList(void)
 	skiplist.insert("__do_global_dtors_aux");
 }
 
-FuncMap::FuncMap(std::string name, std::string path) :
+FuncMap::FuncMap(std::string name, std::string path, bool wrap) :
 		obj(NULL),
 		wrapper(NULL)
 {
 	elf_path = path;
 	elf_name = name;
+	is_wrap = wrap;
 
 	if (skiplist.size() == 0)
 		initSkipList();
 }
 
-FuncMap::FuncMap(string path) :
+FuncMap::FuncMap(string path, bool wrap) :
 		elf_path(path),
+		is_wrap(wrap),
 		obj(NULL),
 		wrapper(NULL)
 {
@@ -61,8 +64,9 @@ FuncMap::FuncMap(string path) :
 		elf_name = elf_path.substr(pos + 1);
 }
 
-FuncMap::FuncMap(BPatch_object *target) :
+FuncMap::FuncMap(BPatch_object *target, bool wrap) :
 		obj(target),
+		is_wrap(wrap),
 		wrapper(NULL)
 {
 	elf_path = obj->pathName();
@@ -70,6 +74,14 @@ FuncMap::FuncMap(BPatch_object *target) :
 
 	if (skiplist.size() == 0)
 		initSkipList();
+}
+
+FuncMap::~FuncMap(void)
+{
+	if (wrapper) {
+		fclose(wrapper);
+		wrapper = NULL;
+	}
 }
 
 uint8_t FuncMap::checkState(void)
@@ -130,35 +142,167 @@ unsigned FuncMap::addFunction(const char *func)
 	return index;
 }
 
-void FuncMap::generateWrapper(BPatch_function *func, unsigned index)
+std::string FuncMap::getWrapFilePath(std::string elf, unsigned type)
+{
+	string name(FUNCMAP_DIR);
+
+	name += FUNCMAP_PREFIX;
+	name += elf;
+	if (type == FUNCMAP_FILE_SRC)
+		name += ".c";
+	else
+		name += ".so";
+	return name;
+}
+
+std::string FuncMap::getWrapSymbolName(unsigned index, unsigned type)
+{
+	string name;
+
+	switch (type) {
+		case FUNCMAP_SYMBOL_HOOK:
+			name = "LPROFILE_HOOK_func" + to_string(index);
+			break;
+		case FUNCMAP_SYMBOL_WRAP:
+			name = "LPROFILE_WRAP_func" + to_string(index);
+			break;
+		default:
+			LPROFILE_ERROR("Wrong func type");
+			break;
+	}
+	return name;
+}
+
+std::string FuncMap::generateWrapDef(
+				unsigned index, unsigned type, bool is_proto,
+				unsigned nb_params, bool has_ret)
+{
+	string funcname;
+
+	funcname = FuncMap::getWrapSymbolName(index, type) + "(";
+
+	if (is_proto) {
+		if (has_ret)
+			funcname = "void *" + funcname;
+		else
+			funcname = "void " + funcname;
+	}
+
+	for (unsigned i = 0; i < nb_params; i++) {
+		if (i > 0)
+			funcname += ", ";
+		if (is_proto)
+			funcname += "void *p" + to_string(i);
+		else
+			funcname += "p" + to_string(i);
+	}
+	funcname += ")";
+	return funcname;
+}
+
+bool FuncMap::generateWrapper(BPatch_function *func, unsigned index)
 {
 	vector<BPatch_localVar *> *params = NULL;
 	bool has_ret = true;
-	int i = 0;
+	unsigned i = 0;
+	string tmpstr;
+
+	LPROFILE_DEBUG("Generate wrapper file");
 
 	if (!wrapper) {
-		string wrap_file(FUNCMAP_DIR);
-		wrap_file += "LPROFILE_WRAP_" + elf_name + ".c";
+		string wrap_file;
+		wrap_file = getWrapFilePath(elf_name, FUNCMAP_FILE_SRC);
 		LPROFILE_DEBUG("Wrap file %s", wrap_file.c_str());
 
 		wrapper = fopen(wrap_file.c_str(), "w");
 		if (!wrapper) {
 			LPROFILE_ERROR("Failed to open wrapper file %s",
 							wrap_file.c_str());
-			return;
+			return false;
 		}
+
+		tmpstr = "#include <stdio.h>\n";
+		tmpstr += "void " + string(FUNC_PRE) + "(unsigned int);\n";
+		tmpstr += "void " + string(FUNC_POST) + "(unsigned int);\n";
+		fprintf(wrapper, "%s", tmpstr.c_str());
 	}
 
 	params = func->getParams();
-	if (func->getReturnType()->getDataClass()
+	if (!func->getReturnType() || func->getReturnType()->getDataClass()
 					== BPatch_dataNullType)
 		has_ret = false;
 	else
 		has_ret = true;
-	LPROFILE_DEBUG("Function %s: %lu params, return %d, %u",
+	LPROFILE_DEBUG("Function %s: %lu params, return %u",
 					func->getName().c_str(),
-					params->size(), has_ret,
-					func->getReturnType()->getDataClass());
+					params->size(), has_ret);
+
+	// generate an empty symbol hook_funcX as a hook
+	tmpstr = generateWrapDef(index, FUNCMAP_SYMBOL_HOOK, true,
+					params->size(), has_ret) + ";\n";
+
+	/* generate the wrap function
+	 * void * wrap_funcX(...) {
+	 *     void *ret;
+	 *     probe(X);
+	 *     ret = hook_funcX(...);
+	 *     probe(X);
+	 *     return ret;
+	 * }
+	 */
+	tmpstr += generateWrapDef(index, FUNCMAP_SYMBOL_WRAP, true,
+					params->size(), has_ret) + " {\n";
+	if (has_ret)
+		tmpstr += "\tvoid *ret;\n";
+
+	tmpstr += "\tfprintf(stdout, \"enter " + to_string(index) + "\\n\");\n";
+//	tmpstr += "\t" + string(FUNC_PRE);
+//	tmpstr += "(" + to_string(index) + ");\n";
+
+	if (has_ret)
+		tmpstr += "\tret = ";
+	else
+		tmpstr += "\t";
+
+	tmpstr += generateWrapDef(index, FUNCMAP_SYMBOL_HOOK, false,
+					params->size(), has_ret) + ";\n";
+
+	tmpstr += "\tfprintf(stdout, \"exit " + to_string(index) + "\\n\");\n";
+//	tmpstr += "\t" + string(FUNC_POST) + "(" + to_string(index) + ");\n";
+
+	if (has_ret)
+		tmpstr += "\treturn ret;\n";
+	tmpstr += "}\n";
+
+	fprintf(wrapper, "%s", tmpstr.c_str());
+
+	return true;
+}
+
+bool FuncMap::compileWrapper(void)
+{
+	string srcfile, libfile;
+	string cmd;
+	int ret = 0;
+
+	if (wrapper) {
+		fclose(wrapper);
+		wrapper = NULL;
+
+		srcfile = getWrapFilePath(elf_name, FUNCMAP_FILE_SRC);
+		libfile = getWrapFilePath(elf_name, FUNCMAP_FILE_LIB);
+//		cmd = "gcc -g -o " + libfile + " -shared -fPIC " + srcfile + " -lprobe";
+		cmd = "gcc -g -o " + libfile + " -shared -fPIC " + srcfile;
+
+		ret = system(cmd.c_str());
+		LPROFILE_DEBUG("CMD %s, ret %d", cmd.c_str(), ret);
+		if (!ret)
+			return true;
+
+		LPROFILE_ERROR("Failed to compile %s, ret %d", srcfile.c_str(), ret);
+		return false;
+	}
+	return true;
 }
 
 bool FuncMap::loadFromCache(void)
@@ -265,8 +409,10 @@ bool FuncMap::loadFromELF(void)
 		for (unsigned i = 0; i < funclist.size(); i++) {
 			unsigned func_idx = addFunction(funclist[i]->getName().c_str());
 
-			if (func_idx != UINT_MAX)
-				generateWrapper(funclist[i], func_idx);
+			if (is_wrap && func_idx != UINT_MAX) {
+				if (!generateWrapper(funclist[i], func_idx))
+					return false;
+			}
 		}
 	}
 	// get the function list directly from BPatch_object
@@ -281,9 +427,19 @@ bool FuncMap::loadFromELF(void)
 			for (unsigned j = 0; j < tmp_funcs.size(); j++) {
 				unsigned func_idx = addFunction(tmp_funcs[i]->getName().c_str());
 
-				if (func_idx != UINT_MAX)
-					generateWrapper(tmp_funcs[i], func_idx);
+				if (is_wrap && func_idx != UINT_MAX) {
+					if (!generateWrapper(tmp_funcs[i], func_idx))
+						return false;
+				}
 			}
+		}
+	}
+
+	if (is_wrap && funcs.size() > 0) {
+		// compile wrapper library
+		if (!compileWrapper()) {
+			LPROFILE_DEBUG("Failed to compile wrapper library");
+			return false;
 		}
 	}
 

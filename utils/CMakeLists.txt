@@ -37,8 +37,8 @@ set(LPROFILE_SRC
 		funcmap.cc
 		funcmaptest.cc
 		prof.cc
-		simple.cc
 		test.cc
+		wrap.cc
 )
 
 # add build target

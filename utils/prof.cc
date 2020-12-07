@@ -37,31 +37,31 @@ ProfTest::~ProfTest(void)
 
 bool ProfTest::init(void)
 {
-//	LPROFILE_DEBUG("create process %s, %d args",
-//					muttee_bin.c_str(), muttee_argc);
-//	int i = 0;
-//
-//	for (i = 0; i < muttee_argc; i++)
-//		LPROFILE_DEBUG("arg[%d] = %s", i, muttee_argv[i]);
-//
-//	LPROFILE_DEBUG("process creating");
-//	proc = bpatch.processCreate(muttee_bin.c_str(), muttee_argv);
-//	if (!proc) {
-//		LPROFILE_ERROR("Failed to create process for muttee");
-//		return false;
-//	}
-//	LPROFILE_DEBUG("process created");
-//
-//	/* init CountUtil */
-//	count.setAS(proc);
-//
-//	/* find target functions */
-//	if (!count.getTargetFuncs()) {
-//		LPROFILE_ERROR("Failed to find target functions (%s)",
-//						count.getPattern().c_str());
-//		return false;
-//	}
-//	return true;
+	LPROFILE_DEBUG("create process %s, %d args",
+					muttee_bin.c_str(), muttee_argc);
+	int i = 0;
+
+	for (i = 0; i < muttee_argc; i++)
+		LPROFILE_DEBUG("arg[%d] = %s", i, muttee_argv[i]);
+
+	LPROFILE_DEBUG("process creating");
+	proc = bpatch.processCreate(muttee_bin.c_str(), muttee_argv);
+	if (!proc) {
+		LPROFILE_ERROR("Failed to create process for muttee");
+		return false;
+	}
+	LPROFILE_DEBUG("process created");
+
+	/* init CountUtil */
+	count.setAS(proc);
+
+	/* find target functions */
+	if (!count.getTargetFuncs()) {
+		LPROFILE_ERROR("Failed to find target functions (%s)",
+						count.getPattern().c_str());
+		return false;
+	}
+	return true;
 }
 
 void ProfTest::staticUsage(void)

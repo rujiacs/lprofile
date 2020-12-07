@@ -6,7 +6,7 @@
 //#include "tracer.h"
 #include "funcmap.h"
 #include "prof.h"
-#include "simple.h"
+#include "wrap.h"
 #include "test.h"
 
 #include "BPatch.h"
@@ -41,10 +41,10 @@ static struct testcmd cmds[TEST_MODE_NUM] = {
 		.construct = ProfTest::construct,
 		.usage = ProfTest::staticUsage,
 	},
-	[TEST_MODE_SIMPLE] = {
-		.cmd = SIMPLE_CMD,
-		.construct = SimpleTest::construct,
-		.usage = SimpleTest::staticUsage,
+	[TEST_MODE_WRAP] = {
+		.cmd = WRAP_CMD,
+		.construct = WrapTest::construct,
+		.usage = WrapTest::staticUsage,
 	},
 //	[TEST_MODE_EDIT] = {
 //		.cmd = EDIT_CMD,

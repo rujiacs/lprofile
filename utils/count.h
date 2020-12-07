@@ -19,7 +19,7 @@ class FuncMap;
 
 #define USE_FUNCCNT
 
-#define LIBCNT "/home/rujia/project/profile/lprofile/build/probe/libprobe.so"
+#define LIBCNT "/home/jr/profile/lprofile/build/probe/libprobe.so"
 
 #ifdef USE_FUNCCNT
 #define FUNC_PRE "lprobe_func_entry_empty"
@@ -40,10 +40,14 @@ class TargetFunc{
 	public:
 		BPatch_function *func;
 		unsigned int index;
+		std::string elf;
 
 		TargetFunc(void);
-		TargetFunc(BPatch_function *, unsigned int);
+		TargetFunc(BPatch_function *, unsigned int, std::string elfname);
 };
+
+typedef std::vector<TargetFunc *> funclist_t;
+typedef std::map<std::string, funclist_t> elfmap_t;
 
 struct range {
 	unsigned int min;
@@ -74,6 +78,7 @@ class CountUtil {
 		struct range func_id_range;
 
 		std::vector<TargetFunc> target_funcs;
+		elfmap_t elf_targets;
 
 	public:
 		/* Get option string for parsing */
@@ -86,7 +91,7 @@ class CountUtil {
 		/* Parse command-line options */
 		bool parseOption(int opt, char *optarg);
 
-		std::vector<TargetFunc>& getTargetLists(void) { return target_funcs; }
+		elfmap_t& getTargetLists(void) { return elf_targets; }
 
 		/* Set address space (for convenience) */
 		void setAS(BPatch_addressSpace *addr) { as = addr; };
@@ -103,9 +108,9 @@ class CountUtil {
 		bool loadFunctions(void);
 
 		/* Get the list of target functions. */
-		bool getTargetFuncs(void);
+		bool getTargetFuncs(bool is_wrap = false);
 		/* Add target function to the list */
-		void addTargetFunc(BPatch_function *func, unsigned idx);
+		void addTargetFunc(BPatch_function *func, unsigned idx, std::string obj);
 
 		/* Insert counting functions into target functions */
 		bool insertCount(void);
