@@ -1575,6 +1575,64 @@ void AddressSpace::replaceFunction(func_instance *oldfunc, func_instance *newfun
    addModifiedFunction(oldfunc);
 }
 
+bool AddressSpace::replaceCallee(func_instance *original,
+				func_instance *wrapper, SymtabAPI::Symbol *hook)
+{
+	if (!original) return false;
+	if (!wrapper) return false;
+
+	if (original->proc() != this)
+		return original->proc()->replaceCallee(original, wrapper, hook);
+	assert(original->proc() == this);
+
+	fprintf(stdout, "[%s][%d]: add replacement(%s:%lx -> %s:%lx, hook %s) to worklist\n",
+					__FILE__, __LINE__,
+					original->name().c_str(), original->addr(),
+					wrapper->name().c_str(), wrapper->addr(),
+					hook->getMangledName().c_str());
+	calleeWorklist_[original] = std::pair<func_instance *, SymtabAPI::Symbol *>(wrapper, hook);
+	return true;
+}
+
+void AddressSpace::replaceCalleePostPatch(func_instance *original,
+				func_instance *wrapper, SymtabAPI::Symbol *hook)
+{
+	fprintf(stdout, "[%s][%d]: handle replacement(%s:%lx -> %s:%lx, hook %s)\n",
+					__FILE__, __LINE__,
+					original->name().c_str(), original->addr(),
+					wrapper->name().c_str(), wrapper->addr(),
+					hook->getMangledName().c_str());
+
+	// replace the hook symbol with original function via PLT modification
+	for (unsigned i = 0; i < mapped_objects.size(); ++i) {
+		mapped_objects[i]->replacePLTStub(hook, original, original->addr());
+	}
+
+	// check the type of original function
+	SymtabAPI::Symbol *origsym = NULL;
+	
+	origsym = original->obj()->parse_img()->symbol_info(original->name());
+	if (!origsym) {
+		fprintf(stderr, "[%s][%d]: failed to find symbol for original function %s\n",
+						__FILE__, __LINE__, original->name().c_str());
+		return;
+	}
+
+	fprintf(stdout, "[%s][%d]: symbol(%s) dynamic %u, bind %u\n",
+					__FILE__, __LINE__, original->name().c_str(),
+					origsym->isInDynSymtab(), origsym->getLinkage());
+
+	if (origsym->getLinkage() == SymtabAPI::Symbol::SL_GLOBAL ||
+					origsym->getLinkage() == SymtabAPI::Symbol::SL_WEAK) {
+
+		for (unsigned i = 0; i < mapped_objects.size(); ++i) {
+			if (mapped_objects[i] == original->obj())
+				continue;
+			mapped_objects[i]->replacePLTStub(origsym, original, wrapper->addr());
+		}
+	}
+}
+
 bool AddressSpace::wrapFunction(func_instance *original, 
                                 func_instance *wrapper,
                                 SymtabAPI::Symbol *clone) {
@@ -1724,6 +1782,13 @@ bool AddressSpace::relocate() {
       wrapFunctionPostPatch(foo->first, foo->second);
   }
   wrappedFunctionWorklist_.clear();
+
+
+  for (std::map<func_instance *, pair<func_instance *, SymtabAPI::Symbol *>>::iterator foo = calleeWorklist_.begin();
+				  foo != calleeWorklist_.end(); ++foo) {
+ 	  replaceCalleePostPatch(foo->first, foo->second.first, foo->second.second);
+  }
+  calleeWorklist_.clear();
 
   return ret;
 }

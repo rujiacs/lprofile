@@ -292,6 +292,10 @@ class BPATCH_DLL_EXPORT BPatch_addressSpace {
 
   bool wrapFunction(BPatch_function *oldFunc, BPatch_function *newFunc, Dyninst::SymtabAPI::Symbol *clone);
 
+  bool replaceCallee(BPatch_function *oldCallee, BPatch_function *newCallee,
+				  Dyninst::SymtabAPI::Symbol *hook);
+
+
   // BPatch_addressSpace::revertWrapFunction
   //
   // Undo the operations of a wrapFunction, restoring the original

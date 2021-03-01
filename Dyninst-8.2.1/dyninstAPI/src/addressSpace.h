@@ -327,6 +327,12 @@ class AddressSpace : public InstructionSource {
     void modifyCall(block_instance *callBlock, func_instance *newCallee, func_instance *context = NULL);
     void revertCall(block_instance *callBlock, func_instance *context = NULL);
     void replaceFunction(func_instance *oldfunc, func_instance *newfunc);
+
+	bool replaceCallee(func_instance *original, func_instance *wrapper,
+					SymtabAPI::Symbol *hook);
+	void replaceCalleePostPatch(func_instance *original,
+					func_instance *wrapper, SymtabAPI::Symbol *hook);
+
     bool wrapFunction(func_instance *original, 
                       func_instance *wrapper, 
                       SymtabAPI::Symbol *clone);
@@ -559,6 +565,7 @@ class AddressSpace : public InstructionSource {
     bool delayRelocation_;
 
     std::map<func_instance *, Dyninst::SymtabAPI::Symbol *> wrappedFunctionWorklist_;
+    std::map<func_instance *, std::pair<func_instance *, Dyninst::SymtabAPI::Symbol *>> calleeWorklist_;
 
   // PatchAPI stuffs
   public:

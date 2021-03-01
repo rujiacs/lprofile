@@ -482,6 +482,34 @@ bool BPatch_addressSpace::revertReplaceFunction(BPatch_function &oldFunc)
   return true;
 }
 
+bool BPatch_addressSpace::replaceCallee(BPatch_function *oldcallee,
+				BPatch_function *newcallee,
+				Dyninst::SymtabAPI::Symbol *hook)
+{
+	func_instance *oldfunc, *newfunc;
+
+	assert(oldcallee->lowlevel_func() && newcallee->lowlevel_func());
+	oldfunc = oldcallee->lowlevel_func();
+	newfunc = newcallee->lowlevel_func();
+
+	if (!getMutationsActive())
+		return false;
+
+	// Self replacement is a nop
+	// We should just test direct equivalence here...
+	if (oldfunc == newfunc)
+		return true;
+
+	if (!oldfunc->proc()->replaceCallee(oldfunc, newfunc, hook))
+		return false;
+
+	if (pendingInsertions == NULL) {
+		bool tmp;
+		finalizeInsertionSet(false, &tmp);
+	}
+	return true;
+}
+
 bool BPatch_addressSpace::wrapFunction(BPatch_function *original,
                                           BPatch_function *wrapper,
                                           Dyninst::SymtabAPI::Symbol *clone)

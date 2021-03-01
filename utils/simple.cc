@@ -160,14 +160,15 @@ bool SimpleTest::parseArgs(LPROFILE_UNUSED int argc,
 	return true;
 }
 
-Symbol *SimpleTest::findHookSymbol(BPatch_function *func_wrap)
+Symbol *SimpleTest::findHookSymbol(BPatch_function *func_wrap, string orgname)
 {
-#if 0
+
 	SymtabAPI::Symtab *symtab = NULL;
 	vector<SymtabAPI::Symbol *> symlist;
 	int i = 0;
 	ParseAPI::Function *ifunc = Dyninst::ParseAPI::convert(func_wrap);
 	ParseAPI::SymtabCodeSource *src = dynamic_cast<ParseAPI::SymtabCodeSource *>(ifunc->obj()->cs());
+	string symname = "__" + orgname;
 
 	if (!src) {
 		LPROFILE_ERROR("Error: wrapper function created from non-SymtabAPI code source");
@@ -176,11 +177,12 @@ Symbol *SimpleTest::findHookSymbol(BPatch_function *func_wrap)
 
 	symtab = src->getSymtabObject();
 
-	if (symtab->findSymbol(symlist, SIMPLE_HOOK_FUNC, Symbol::ST_UNKNOWN,
+	if (symtab->findSymbol(symlist, symname, Symbol::ST_UNKNOWN,
 							anyName, false, false, true)) {
 		return symlist[0];
 	}
-#endif
+
+	LPROFILE_ERROR("Failed to find hook symbol %s", symname.c_str());
 	return NULL;
 }
 
@@ -188,6 +190,7 @@ Symbol *SimpleTest::findHookSymbol(BPatch_function *func_wrap)
 void SimpleTest::findCaller(MutteeFunc *tfunc)
 {
 	vector<BPatch_point *> caller_points;
+	size_t i = 0;
 
 	tfunc->func->getCallerPoints(caller_points);
 	LPROFILE_INFO("Find %lu callers for %s",
@@ -200,17 +203,53 @@ void SimpleTest::findCaller(MutteeFunc *tfunc)
 							point->getFunction()->getName().c_str(),
 							SIMPLE_FUNC);
 		}
-		if (!proc->replaceFunctionCall(*point, *func_wrap)) {
-			LPROFILE_ERROR("Failed to modify function call: %s->%s",
-							point->getFunction()->getName().c_str(),
-							SIMPLE_FUNC);
-			return false;
-		}
+//		if (!proc->replaceFunctionCall(*point, *func_wrap)) {
+//			LPROFILE_ERROR("Failed to modify function call: %s->%s",
+//							point->getFunction()->getName().c_str(),
+//							SIMPLE_FUNC);
+//			return false;
+//		}
 	}
 }
 
 bool SimpleTest::process(void)
 {
+	BPatch_object *libwrap = NULL;
+	size_t i = 0;
+
+	LPROFILE_INFO("Load %s", SIMPLE_LIBWRAP);
+	libwrap = proc->loadLibrary(SIMPLE_LIBWRAP);
+	if (!libwrap) {
+		LPROFILE_ERROR("Failed to load %s", SIMPLE_LIBWRAP);
+		return false;
+	}
+
+	for (i = 0; i < targets.size(); i++) {
+		string wrap_str = "wrap_";
+		BPatch_function *func_orig = targets[i].func;
+		BPatch_function *func_wrap = NULL;
+		vector<BPatch_function *> tfuncs;
+		Symbol *hooksym = NULL;
+
+		wrap_str += func_orig->getName();
+		libwrap->findFunction(wrap_str, tfuncs, false);
+		if (tfuncs.size() == 0) {
+			LPROFILE_ERROR("Failed to find wrapper %s", wrap_str.c_str());
+			continue;
+		}
+
+		func_wrap = tfuncs[0];
+
+		hooksym = findHookSymbol(func_wrap, func_orig->getName());
+		if (!hooksym)
+			continue;
+
+		if (!proc->replaceCallee(func_orig, func_wrap, hooksym)) {
+			LPROFILE_ERROR("Failed to replace callee (%s->%s)",
+							func_orig->getName().c_str(),
+							func_wrap->getName().c_str());
+		}
+	}
 
 #if 0
 	BPatch_object *libwrap = NULL;
@@ -224,13 +263,6 @@ bool SimpleTest::process(void)
 		return false;
 	}
 	func_orig = target_funcs[0].func;
-
-	LPROFILE_INFO("Load %s", SIMPLE_LIBWRAP);
-	libwrap = proc->loadLibrary(SIMPLE_LIBWRAP);
-	if (!libwrap) {
-		LPROFILE_ERROR("Failed to load %s", SIMPLE_LIBWRAP);
-		return false;
-	}
 
 	LPROFILE_INFO("Load wrap function %s", SIMPLE_WRAP_FUNC);
 	func_wrap = count.findFunction(libwrap, SIMPLE_WRAP_FUNC);
