@@ -27,6 +27,13 @@ using namespace std;
 using namespace Dyninst;
 using namespace Dyninst::SymtabAPI;
 
+MutteeFunc::MutteeFunc(BPatch_function *f, BPatch_object *o, unsigned i)
+		: func(f), obj(o), index(i)
+{
+	is_shared = func->isSharedLib();
+}
+
+
 Test *SimpleTest::construct(void)
 {
 	return new SimpleTest();
@@ -38,30 +45,104 @@ SimpleTest::SimpleTest(void)
 
 SimpleTest::~SimpleTest(void)
 {
-	zfree(muttee_argv);
+// 	zfree(muttee_argv);
+}
+
+static const char *syslib[] = {
+	"libc.so",
+	"libdl.so",
+	"libpthread.so",
+	NULL
+};
+
+bool SimpleTest::isSystemLib(BPatch_object *obj)
+{
+	if (obj->isSystemLib())
+		return true;
+
+	int i = 0;
+	const char *str = syslib[i];
+
+	while (str != NULL) {
+		if (strncmp(str, obj->name().c_str(), strlen(str)) == 0)
+			return true;
+		i++;
+		str = syslib[i];
+	}
+	return false;
+}
+
+void SimpleTest::findTarget(const char *targ)
+{
+	vector<BPatch_object *> allobjs;
+	vector<BPatch_function *> funcs;
+
+	proc->getImage()->getObjects(allobjs);
+
+	for (size_t i = 0; i < allobjs.size(); i++) {
+		if (isSystemLib(allobjs[i]))
+			continue;
+
+		LPROFILE_INFO("Searching obj %s", allobjs[i]->name().c_str());
+
+		funcs.clear();
+		allobjs[i]->findFunction(targ, funcs, false);
+
+		for (size_t j = 0; j < funcs.size(); j++) {
+			targets.push_back(MutteeFunc(funcs[j], allobjs[i]));
+
+			LPROFILE_INFO("Find target function %s in %s, shared %u",
+							targets[targets.size() - 1].func->getName().c_str(),
+							targets[targets.size() - 1].obj->name().c_str(),
+							targets[targets.size() - 1].is_shared);
+		}
+	}
+}
+
+bool SimpleTest::findTargets(void)
+{
+	string pattern(SIMPLE_FUNC);
+	size_t pos = 0, cur = 0;
+
+	pos = pattern.find(",");
+	while (true) {
+		string substr = pattern.substr(cur, (pos - cur));
+
+		LPROFILE_INFO("pattern %s", substr.c_str());
+
+		findTarget(substr.c_str());
+		if (pos == string::npos ||
+						(pos + 1) >= pattern.size())
+			break;
+
+		cur = pos + 1;
+		pos = pattern.find(",", cur);
+	}
+
+	if (targets.size() == 0) {
+		LPROFILE_ERROR("No function matches the target pattern %s",
+						pattern.c_str());
+		return false;
+	}
+	return true;
 }
 
 bool SimpleTest::init(void)
 {
-	LPROFILE_DEBUG("create process %s", SIMPLE_MUTTEE);
+	LPROFILE_INFO("create process %s", SIMPLE_MUTTEE);
 	int i = 0;
 
-	LPROFILE_DEBUG("process creating");
+	LPROFILE_INFO("process creating");
 	proc = bpatch.processCreate(SIMPLE_MUTTEE, NULL);
 	if (!proc) {
 		LPROFILE_ERROR("Failed to create process for muttee");
 		return false;
 	}
-	LPROFILE_DEBUG("process created");
+	LPROFILE_INFO("process created");
 
-	/* init CountUtil */
-	count.setAS(proc);
-	count.setPattern(SIMPLE_FUNC);
-
-	/* find target functions */
-	if (!count.getTargetFuncs(false)) {
-		LPROFILE_ERROR("Failed to find target functions (%s)",
-						count.getPattern().c_str());
+	if (!findTargets()) {
+		LPROFILE_ERROR("Failed to find target functions %s",
+						SIMPLE_FUNC);
 		return false;
 	}
 	return true;
@@ -81,6 +162,7 @@ bool SimpleTest::parseArgs(LPROFILE_UNUSED int argc,
 
 Symbol *SimpleTest::findHookSymbol(BPatch_function *func_wrap)
 {
+#if 0
 	SymtabAPI::Symtab *symtab = NULL;
 	vector<SymtabAPI::Symbol *> symlist;
 	int i = 0;
@@ -98,11 +180,39 @@ Symbol *SimpleTest::findHookSymbol(BPatch_function *func_wrap)
 							anyName, false, false, true)) {
 		return symlist[0];
 	}
+#endif
 	return NULL;
+}
+
+
+void SimpleTest::findCaller(MutteeFunc *tfunc)
+{
+	vector<BPatch_point *> caller_points;
+
+	tfunc->func->getCallerPoints(caller_points);
+	LPROFILE_INFO("Find %lu callers for %s",
+					caller_points.size(), SIMPLE_FUNC);
+	for (i = 0; i < caller_points.size(); i++) {
+		BPatch_point *point = caller_points[i];
+
+		if (point->getFunction()) {
+			LPROFILE_INFO("CALL %s->%s",
+							point->getFunction()->getName().c_str(),
+							SIMPLE_FUNC);
+		}
+		if (!proc->replaceFunctionCall(*point, *func_wrap)) {
+			LPROFILE_ERROR("Failed to modify function call: %s->%s",
+							point->getFunction()->getName().c_str(),
+							SIMPLE_FUNC);
+			return false;
+		}
+	}
 }
 
 bool SimpleTest::process(void)
 {
+
+#if 0
 	BPatch_object *libwrap = NULL;
 	BPatch_function *func_wrap = NULL, *func_orig = NULL;
 	vector<TargetFunc> target_funcs;
@@ -115,27 +225,27 @@ bool SimpleTest::process(void)
 	}
 	func_orig = target_funcs[0].func;
 
-	LPROFILE_DEBUG("Load %s", SIMPLE_LIBWRAP);
+	LPROFILE_INFO("Load %s", SIMPLE_LIBWRAP);
 	libwrap = proc->loadLibrary(SIMPLE_LIBWRAP);
 	if (!libwrap) {
 		LPROFILE_ERROR("Failed to load %s", SIMPLE_LIBWRAP);
 		return false;
 	}
 
-	LPROFILE_DEBUG("Load wrap function %s", SIMPLE_WRAP_FUNC);
+	LPROFILE_INFO("Load wrap function %s", SIMPLE_WRAP_FUNC);
 	func_wrap = count.findFunction(libwrap, SIMPLE_WRAP_FUNC);
 	if (!func_wrap)
 		return false;
 
-	LPROFILE_DEBUG("%s: %lx", SIMPLE_WRAP_FUNC,
+	LPROFILE_INFO("%s: %lx", SIMPLE_WRAP_FUNC,
 					(Address)func_wrap->getBaseAddr());
-	LPROFILE_DEBUG("%s: %lx", SIMPLE_FUNC,
+	LPROFILE_INFO("%s: %lx", SIMPLE_FUNC,
 					(Address)func_orig->getBaseAddr());
 
-	LPROFILE_DEBUG("replace function %s with %s",
+	LPROFILE_INFO("replace function %s with %s",
 					SIMPLE_FUNC, SIMPLE_WRAP_FUNC);
 //	if (!proc->replaceFunction(*func_orig, *func_wrap)) {
-//		LPROFILE_DEBUG("Failed to replace %s", SIMPLE_FUNC);
+//		LPROFILE_INFO("Failed to replace %s", SIMPLE_FUNC);
 //		return false;
 //	}
 
@@ -144,13 +254,13 @@ bool SimpleTest::process(void)
 	int i = 0;
 
 	func_orig->getCallerPoints(call_points);
-	LPROFILE_DEBUG("Find %lu callers for %s",
+	LPROFILE_INFO("Find %lu callers for %s",
 					call_points.size(), SIMPLE_FUNC);
 	for (i = 0; i < call_points.size(); i++) {
 		BPatch_point *point = call_points[i];
 
 		if (point->getFunction()) {
-			LPROFILE_DEBUG("CALL %s->%s",
+			LPROFILE_INFO("CALL %s->%s",
 							point->getFunction()->getName().c_str(),
 							SIMPLE_FUNC);
 		}
@@ -178,11 +288,12 @@ bool SimpleTest::process(void)
 		return false;
 	}
 
-	LPROFILE_DEBUG("Replace call to %s with %s", SIMPLE_HOOK_FUNC, SIMPLE_FUNC);
+	LPROFILE_INFO("Replace call to %s with %s", SIMPLE_HOOK_FUNC, SIMPLE_FUNC);
 	if (!proc->replaceFunctionCall(*hook_point, *func_orig)) {
 		LPROFILE_ERROR("Failed to replace function");
 		return false;
 	}
+#endif
 
 	// start the muttee
 	proc->continueExecution();
@@ -193,11 +304,11 @@ bool SimpleTest::process(void)
 	}
 
 	if (proc->terminationStatus() == ExitedNormally) {
-		LPROFILE_DEBUG("Muttee exited with code %d", proc->getExitCode());
+		LPROFILE_INFO("Muttee exited with code %d", proc->getExitCode());
 	} else if (proc->terminationStatus() == ExitedViaSignal)  {
-		LPROFILE_DEBUG("!!! Muttee exited with signal %d", proc->getExitSignal());
+		LPROFILE_INFO("!!! Muttee exited with signal %d", proc->getExitSignal());
 	} else {
-		LPROFILE_DEBUG("Unknown application exit");
+		LPROFILE_INFO("Unknown application exit");
 	}
 
 //	// write to file

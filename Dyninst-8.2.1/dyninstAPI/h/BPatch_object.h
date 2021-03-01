@@ -146,6 +146,7 @@ class BPATCH_DLL_EXPORT BPatch_object {
     //  if there is not overlapping code. 
     bool findPoints(Dyninst::Address addr, std::vector<BPatch_point *> &points);
 
+	bool isSystemLib(void);
 };
 
 #endif

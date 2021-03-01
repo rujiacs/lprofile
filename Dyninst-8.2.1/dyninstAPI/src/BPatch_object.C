@@ -63,6 +63,17 @@ AddressSpace *BPatch_object::ll_as() { return obj->proc(); }
 
 BPatch_addressSpace *BPatch_object::as() { return img->getAddressSpace(); }
 
+bool BPatch_object::isSystemLib(void) {
+	for (size_t i = 0; i < mods.size(); i++) {
+		if (mods[i]->isSharedLib()) {
+			if (mods[i]->isSystemLib())
+				return true;
+		}
+	}
+	return false;
+}
+
+
 std::string BPatch_object::name() {
    return obj->fileName();
 }
