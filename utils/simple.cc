@@ -74,23 +74,20 @@ bool SimpleTest::isSystemLib(BPatch_object *obj)
 
 void SimpleTest::findTarget(const char *targ)
 {
-	vector<BPatch_object *> allobjs;
+	vector<BPatch_module *> mods;
 	vector<BPatch_function *> funcs;
 
-	proc->getImage()->getObjects(allobjs);
+	proc->getImage()->getModules(mods);
 
-	for (size_t i = 0; i < allobjs.size(); i++) {
-		if (isSystemLib(allobjs[i]))
+	for (size_t i = 0; i < mods.size(); i++) {
+		if (isSystemLib(mods[i]->getObject()))
 			continue;
 
-		LPROFILE_INFO("Searching obj %s", allobjs[i]->name().c_str());
-
-		vector<BPatch_module *> *mods = getModules();
+		LPROFILE_INFO("Searching obj %s",
+						mods[i]->getObject()->name().c_str());
 
 		funcs.clear();
-		for (unsigned int j = 0; j < (unsigned) mods->size(); j++) {
-			(*mods)[j]->getProcedures(funcs);
-   		}
+		mods[i]->getProcedures(funcs);
 		
 		for (size_t j = 0; j < funcs.size(); j++) {
 			LPROFILE_INFO("%s", funcs[j]->getName().c_str());
