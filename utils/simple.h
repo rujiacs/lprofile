@@ -12,10 +12,10 @@ class BPatch_process;
 
 #define SIMPLE_CMD "simple"
 
-#define SIMPLE_MUTTEE "/home/rujia/project/profile/lprofile/test/test"
+#define SIMPLE_MUTTEE "/home/jiaru/vpp/vpp"
 #define SIMPLE_LIBWRAP "/home/rujia/project/profile/lprofile/test/lib/libtest.so"
 
-#define SIMPLE_FUNC "libfunc,func"
+#define SIMPLE_FUNC "acl_in_l2_ip4_node_fn_avx2"
 //#define SIMPLE_WRAP_FUNC "wrap_func"
 //#define SIMPLE_HOOK_FUNC "__func"
 

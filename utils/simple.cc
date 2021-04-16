@@ -85,17 +85,27 @@ void SimpleTest::findTarget(const char *targ)
 
 		LPROFILE_INFO("Searching obj %s", allobjs[i]->name().c_str());
 
+		vector<BPatch_module *> *mods = getModules();
+
 		funcs.clear();
-		allobjs[i]->findFunction(targ, funcs, false);
-
+		for (unsigned int j = 0; j < (unsigned) mods->size(); j++) {
+			(*mods)[j]->getProcedures(funcs);
+   		}
+		
 		for (size_t j = 0; j < funcs.size(); j++) {
-			targets.push_back(MutteeFunc(funcs[j], allobjs[i]));
-
-			LPROFILE_INFO("Find target function %s in %s, shared %u",
-							targets[targets.size() - 1].func->getName().c_str(),
-							targets[targets.size() - 1].obj->name().c_str(),
-							targets[targets.size() - 1].is_shared);
+			LPROFILE_INFO("%s", funcs[j]->getName().c_str());
 		}
+
+		// allobjs[i]->findFunction(targ, funcs, false);
+
+		// for (size_t j = 0; j < funcs.size(); j++) {
+		// 	targets.push_back(MutteeFunc(funcs[j], allobjs[i]));
+
+		// 	LPROFILE_INFO("Find target function %s in %s, shared %u",
+		// 					targets[targets.size() - 1].func->getName().c_str(),
+		// 					targets[targets.size() - 1].obj->name().c_str(),
+		// 					targets[targets.size() - 1].is_shared);
+		// }
 	}
 }
 
@@ -214,6 +224,7 @@ void SimpleTest::findCaller(MutteeFunc *tfunc)
 
 bool SimpleTest::process(void)
 {
+#if 0
 	BPatch_object *libwrap = NULL;
 	size_t i = 0;
 
@@ -327,6 +338,7 @@ bool SimpleTest::process(void)
 	}
 #endif
 
+
 	// start the muttee
 	proc->continueExecution();
 
@@ -342,7 +354,7 @@ bool SimpleTest::process(void)
 	} else {
 		LPROFILE_INFO("Unknown application exit");
 	}
-
+#endif
 //	// write to file
 //	if (!editor->writeFile(output.c_str())) {
 //		LPROFILE_ERROR("Failed to write new file %s",
