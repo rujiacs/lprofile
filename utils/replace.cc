@@ -144,11 +144,12 @@ bool ReplaceTest::parseArgs(LPROFILE_UNUSED int argc,
 	return true;
 }
 
-void ReplaceTest::handleElf(string elf, funclist_t &targets)
+void ReplaceTest::handleElf(string elf, vector<size_t> &targets)
 {
 	unsigned int i = 0;
 	BPatch_object *libwrap = NULL;
 	string wrap_path;
+	vector<TargetFunc> &target_funcs = count.getTargets();
 
 	wrap_path = FuncMap::getWrapFilePath(elf, FUNCMAP_FILE_LIB);
 	LPROFILE_DEBUG("Load wrapper library %s", wrap_path.c_str());
@@ -159,7 +160,7 @@ void ReplaceTest::handleElf(string elf, funclist_t &targets)
 	}
 	LPROFILE_DEBUG("%lu functions in %s", targets.size(), elf.c_str());
 	for (i = 0; i < targets.size(); i++)
-		handleFunction(libwrap, targets[i]);
+		handleFunction(libwrap, &target_funcs[targets[i]]);
 }
 
 void ReplaceTest::handleFunction(BPatch_object *libwrap, TargetFunc *func)

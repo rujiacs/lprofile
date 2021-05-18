@@ -46,6 +46,7 @@
 #include "BPatch_thread.h"
 #include "BPatch_function.h"
 #include "BPatch_point.h"
+#include "BPatch_object.h"
 
 #include "BPatch_private.h"
 
@@ -501,6 +502,39 @@ bool BPatch_addressSpace::replaceCallee(BPatch_function *oldcallee,
 		return true;
 
 	if (!oldfunc->proc()->replaceCallee(oldfunc, newfunc, hook))
+		return false;
+
+	if (pendingInsertions == NULL) {
+		bool tmp;
+		finalizeInsertionSet(false, &tmp);
+	}
+	return true;
+}
+
+bool BPatch_addressSpace::wrapDynFunction(BPatch_function *oldcallee,
+				BPatch_function *newcallee,
+				Dyninst::SymtabAPI::Symbol *hook,
+            BPatch_Vector<BPatch_object *> target_objs)
+{
+	func_instance *oldfunc, *newfunc;
+   vector<mapped_object *> tmods;
+
+	assert(oldcallee->lowlevel_func() && newcallee->lowlevel_func());
+	oldfunc = oldcallee->lowlevel_func();
+	newfunc = newcallee->lowlevel_func();
+
+	if (!getMutationsActive())
+		return false;
+
+	// Self replacement is a nop
+	// We should just test direct equivalence here...
+	if (oldfunc == newfunc)
+		return true;
+
+   for (size_t i = 0; i < target_objs.size(); i++)
+      tmods.push_back(target_objs[i]->lowlevel_obj());
+
+	if (!oldfunc->proc()->wrapDynFunction(oldfunc, newfunc, hook, tmods))
 		return false;
 
 	if (pendingInsertions == NULL) {

@@ -294,7 +294,9 @@ class BPATCH_DLL_EXPORT BPatch_addressSpace {
 
   bool replaceCallee(BPatch_function *oldCallee, BPatch_function *newCallee,
 				  Dyninst::SymtabAPI::Symbol *hook);
-
+          
+  bool wrapDynFunction(BPatch_function *oldCallee, BPatch_function *newCallee,
+				  Dyninst::SymtabAPI::Symbol *hook, BPatch_Vector<BPatch_object *>target_mods);
 
   // BPatch_addressSpace::revertWrapFunction
   //

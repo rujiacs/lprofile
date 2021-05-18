@@ -10,6 +10,7 @@
 
 class BPatch_process;
 class BPatch_binaryEdit;
+class BPatch_module;
 #define PROF_CMD "prof"
 
 class ProfTest: public Test {
@@ -39,9 +40,9 @@ class ProfTest: public Test {
 		void destroy(void) {};
 
 	private:
-#ifndef USE_FUNCCNT
 		bool insertInit(void);
-#endif
+		bool insertExit(void);
+		BPatch_module *findMainModule(void);
 };
 
 

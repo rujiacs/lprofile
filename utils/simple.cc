@@ -167,7 +167,7 @@ bool SimpleTest::parseArgs(LPROFILE_UNUSED int argc,
 	return true;
 }
 
-Symbol *SimpleTest::findHookSymbol(BPatch_function *func_wrap, string orgname)
+SymtabAPI::Symbol *SimpleTest::findHookSymbol(BPatch_function *func_wrap, string orgname)
 {
 
 	SymtabAPI::Symtab *symtab = NULL;

@@ -111,6 +111,12 @@ bool ProfTest::parseArgs(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
+	if (argc <= 0) {
+		LPROFILE_ERROR("Wrong options");
+		staticUsage();
+		return false;
+	}
+
 	muttee_bin = argv[0];
 	// check if muttee is valid.
 	if (access(muttee_bin.c_str(), X_OK) < 0) {
@@ -147,7 +153,70 @@ bool ProfTest::parseArgs(int argc, char **argv)
 	return true;
 }
 
-#ifndef USE_FUNCCNT
+BPatch_module *ProfTest::findMainModule(void)
+{
+	BPatch_Vector<BPatch_function *> funcs;
+
+	as->getImage()->findFunction("^main", funcs);
+	if (funcs.size() == 0) {
+		LPROFILE_ERROR("Cannot find main()");
+		return NULL;
+	}
+
+	return funcs[0]->getModule();
+}
+
+bool ProfTest::insertExit(void)
+{
+	BPatch_Vector<BPatch_snippet *> exit_arg;
+	BPatch_Vector<BPatch_point *> *exit_point = NULL;
+	BPatchSnippetHandle *handle = NULL;
+	BPatch_Vector<BPatch_function *> funcs;
+	BPatch_module *mainmod = NULL;
+	string target_elf;
+
+	BPatch_funcCallExpr exit_expr(*(count.getExit()), exit_arg);
+
+	/* insert global exiting function */
+	as->getImage()->findFunction("^_fini", funcs);
+	
+	if (mode == LPROFILE_MODE_PROC) {
+		mainmod = findMainModule();
+		if (mainmod == NULL) {
+			LPROFILE_ERROR("Failed to find global exit point");
+			return false;
+		}
+	}
+	else {
+		target_elf = muttee_bin.substr(muttee_bin.find_last_of('/') + 1);
+	}
+
+	for (unsigned int i = 0; i < funcs.size(); i++) {
+		BPatch_module *mod = funcs[i]->getModule();
+
+		if (mode == LPROFILE_MODE_PROC && mod != mainmod)
+			continue;
+		if (mode == LPROFILE_MODE_EDIT) {
+			if (target_elf.compare(mod->getObject()->name()))
+				continue;
+		}
+
+		LPROFILE_INFO("Insert exit function to %s",
+						mod->getObject()->name().c_str());
+		handle = mod->insertFiniCallback(exit_expr);
+		if (!handle) {
+			LPROFILE_ERROR("Failed to insert exit function to %s",
+							mod->getObject()->name().c_str());
+			return false;
+		}
+
+		count.addTargetFunc(funcs[i], UINT_MAX,
+								mod->getObject()->name().c_str());
+		break;
+	}
+	return true;
+}
+
 bool ProfTest::insertInit(void)
 {
 	BPatch_Vector<BPatch_function *> funcs;
@@ -164,33 +233,51 @@ bool ProfTest::insertInit(void)
 	BPatch_funcCallExpr init_expr(*(count.getInit()),
 					init_arg);
 
-	editor->getImage()->findFunction("^_init", funcs);
-	if (funcs.size() == 0) {
-		LPROFILE_ERROR("No _init function is found.");
-		ret = false;
-		goto free_arg;
-	}
+	if (mode == LPROFILE_MODE_PROC) {
+		BPatch_process *proc = (BPatch_process *)as;
+		int initret = 0;
 
-	target_elf = file.substr(file.find_last_of('/') + 1);
-	LPROFILE_DEBUG("Target ELF %s", target_elf.c_str());
-
-	for (unsigned int i = 0; i < funcs.size(); i++) {
-		BPatch_module *mod = funcs[i]->getModule();
-
-		if (target_elf.compare(mod->getObject()->name()))
-			continue;
-
-		LPROFILE_INFO("Insert init function to %s",
-						mod->getObject()->name().c_str());
-		handle = mod->getObject()->insertInitCallback(init_expr);
-		if (!handle) {
-			LPROFILE_ERROR("Failed to insert init function to %s",
-							mod->getObject()->name().c_str());
+		initret = (int)(uintptr_t)(proc->oneTimeCode(init_expr));
+		if (initret) {
+			LPROFILE_ERROR("Failed to execute init code, ret %d", initret);
 			ret = false;
 			goto free_arg;
 		}
-		count.addTargetFunc(funcs[i], UINT_MAX);
 	}
+	else {
+		BPatch_binaryEdit *editor = (BPatch_binaryEdit *)as;
+
+		editor->getImage()->findFunction("^_init", funcs);
+		if (funcs.size() == 0) {
+			LPROFILE_ERROR("No _init function is found.");
+			ret = false;
+			goto free_arg;
+		}
+
+		target_elf = muttee_bin.substr(muttee_bin.find_last_of('/') + 1);
+		LPROFILE_DEBUG("Target ELF %s", target_elf.c_str());
+
+		for (unsigned int i = 0; i < funcs.size(); i++) {
+			BPatch_module *mod = funcs[i]->getModule();
+
+			if (target_elf.compare(mod->getObject()->name()))
+				continue;
+
+			LPROFILE_INFO("Insert init function to %s",
+							mod->getObject()->name().c_str());
+			handle = mod->insertInitCallback(init_expr);
+			if (!handle) {
+				LPROFILE_ERROR("Failed to insert init function to %s",
+								mod->getObject()->name().c_str());
+				ret = false;
+				goto free_arg;
+			}
+			count.addTargetFunc(funcs[i], UINT_MAX,
+								mod->getObject()->name().c_str());
+			break;
+		}
+	}
+	
 
 free_arg:
 	for (unsigned int i = 0; i < init_arg.size(); i++) {
@@ -198,7 +285,6 @@ free_arg:
 	}
 	return ret;
 }
-#endif
 
 bool ProfTest::process(void)
 {
@@ -208,24 +294,31 @@ bool ProfTest::process(void)
 		return false;
 	}
 
-	// insert counter
-	if (!count.insertCount()) {
-		LPROFILE_ERROR("Failed to insert counting functions");
-		return false;
-	}
-
-#ifndef USE_FUNCCNT	
 	// insert init function
 	if (!insertInit()) {
 		LPROFILE_ERROR("Failed to insert init function");
 		return false;
 	}
-#endif
 
 	// insert exit function
-	if (!count.insertExit(muttee_bin.substr(
-								muttee_bin.find_last_of('/') + 1))) {
+	if (!insertExit()) {
 		LPROFILE_ERROR("Failed to insert exit function");
+		return false;
+	}
+
+	if (!count.wrapFunction("pthread_create")) {
+		LPROFILE_ERROR("Failed to wrap pthread_create");
+		return false;
+	}
+
+	if (!count.wrapFunction("pthread_exit")) {
+		LPROFILE_ERROR("Failed to wrap pthread_exit");
+		return false;
+	}
+
+	// insert counter
+	if (!count.insertCount()) {
+		LPROFILE_ERROR("Failed to insert counting functions");
 		return false;
 	}
 

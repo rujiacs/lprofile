@@ -101,7 +101,7 @@ static inline ssize_t readn(int fd, void *buf, size_t n)
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
 
 
-//#define LPROBE_DEBUG_PRINT
+#define LPROBE_DEBUG_PRINT
 
 #define LPROBE_UNUSED __attribute__((unused))
 

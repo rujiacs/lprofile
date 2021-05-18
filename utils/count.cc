@@ -8,6 +8,10 @@
 #include "BPatch_function.h"
 #include "BPatch_image.h"
 #include "BPatch_object.h"
+#include "CodeSource.h"
+#include "CodeObject.h"
+#include "Symbol.h"
+#include "Symtab.h"
 
 #include "count.h"
 #include "funcmap.h"
@@ -64,17 +68,38 @@ void CountUtil::addTargetFunc(BPatch_function *func, unsigned idx, std::string o
 	if (it == elf_targets.end()) {
 		std::pair<elfmap_t::iterator, bool> ret;
 
-		ret = elf_targets.insert(std::pair<std::string, funclist_t>(obj,
-											std::vector<TargetFunc*>()));
+		ret = elf_targets.insert(std::pair<std::string, vector<size_t>>(obj,
+											std::vector<size_t>()));
 		it = ret.first;
 		LPROFILE_DEBUG("new target elf %s", obj.c_str());
 	}
 
 	target_funcs.push_back(TargetFunc(func, idx, obj));
-	it->second.push_back(&(target_funcs.back()));
+	it->second.push_back(target_funcs.size() - 1);
 }
 
 void CountUtil::matchFuncs(BPatch_object *obj,
+				FuncMap *fmap, string pattern)
+{
+	size_t pos = 0, cur = 0;
+
+	pos = pattern.find(",");
+	while (true) {
+		string substr = pattern.substr(cur, (pos - cur));
+
+		LPROFILE_INFO("pattern %s", substr.c_str());
+
+		matchFunc(obj, fmap, substr.c_str());
+		if (pos == string::npos ||
+						(pos + 1) >= pattern.size())
+			break;
+
+		cur = pos + 1;
+		pos = pattern.find(",", cur);
+	}
+}
+
+void CountUtil::matchFunc(BPatch_object *obj,
 				FuncMap *fmap, string pattern)
 {
 	BPatch_Vector<BPatch_function *> tfuncs;
@@ -99,44 +124,59 @@ void CountUtil::matchFuncs(BPatch_object *obj,
 		unsigned j = 0;
 
 		for (j = 0; j < it->second.size(); j++) {
-			TargetFunc *pf = it->second[j];
+			TargetFunc *pf = &target_funcs[it->second[j]];
 
-			LPROFILE_INFO("Target function %s:%s(%s), ID %u",
+			LPROFILE_INFO("Target function %s:%p(%lu), ID %u",
 							it->first.c_str(),
-							pf->func->getName().c_str(),
-							pf->elf.c_str(), pf->index);
+							(void*)pf->func, it->second[j], pf->index);
+
+			// LPROFILE_INFO("Target function %s:%s(%s), ID %u",
+			// 				it->first.c_str(),
+			// 				pf->func->getName().c_str(),
+			// 				pf->elf.c_str(), pf->index);
 		}
 	}
 }
 
-#define OSLIBPATH_PREFIX "/lib/"
-#define DYNINSTLIB_PREFIX "/home/jr/profile/lprofile/build/lprofile/dyninst/lib/"
+
 
 const static char *skiplib[] = {
 	"libpapi", "libpfm", NULL
 };
 
+const static char *osprefix[] = {
+	"/usr/lib64/", "/lib64/", "/usr/local/gcc/", NULL
+};
+
 void CountUtil::getUserObjs(BPatch_Vector<BPatch_object *> &objs)
 {
 	BPatch_object *obj = NULL;
-	string osprefix(OSLIBPATH_PREFIX);
-	string diprefix(DYNINSTLIB_PREFIX);
 	BPatch_Vector<BPatch_object *> allobjs;
 
 	as->getImage()->getObjects(allobjs);
 	for (unsigned i = 0; i < allobjs.size(); i++) {
-		std::string path;
-
 		obj = allobjs[i];
-		path = obj->pathName();
-
-		if (!path.compare(0, osprefix.size(), osprefix) ||
-						!path.compare(0, diprefix.size(), diprefix)) {
-			LPROFILE_INFO("Skip object %s", obj->name().c_str());
+		if (obj->isSystemLib()) {
+			LPROFILE_INFO("Skip system lib %s", obj->pathName().c_str());
 			continue;
 		}
 
 		bool is_skip = false;
+
+		for(unsigned j = 0; ; j++) {
+			const char *str = osprefix[j];
+
+			if (!str)
+				break;
+
+			if (obj->pathName().compare(0, strlen(str), str) == 0) {
+				is_skip = true;
+				LPROFILE_INFO("Skip object %s", obj->pathName().c_str());
+				break;
+			}
+		}
+		if (is_skip)
+			continue;
 
 		for(unsigned j = 0; ; j++) {
 			const char *str = skiplib[j];
@@ -146,7 +186,7 @@ void CountUtil::getUserObjs(BPatch_Vector<BPatch_object *> &objs)
 
 			if (obj->name().find(str) != std::string::npos) {
 				is_skip = true;
-				LPROFILE_INFO("Skip object %s", path.c_str());
+				LPROFILE_INFO("Skip object %s", obj->pathName().c_str());
 				break;
 			}
 		}
@@ -220,7 +260,7 @@ bool CountUtil::insertCount(void)
 
 bool CountUtil::loadFunctions(void)
 {
-	BPatch_object *libcnt = NULL;
+	libcnt = NULL;
 
 	// load lib
 	LPROFILE_INFO("Load %s", LIBCNT);
@@ -239,10 +279,10 @@ bool CountUtil::loadFunctions(void)
 		return false;
 	}
 
-#ifndef USE_FUNCCNT
 	LPROFILE_INFO("Load init function");
 	func_init = findFunction(libcnt, FUNC_INIT);
-	if (!func_init) {
+	func_tinit = findFunction(libcnt, FUNC_TINIT);
+	if (!func_init || !func_tinit) {
 		LPROFILE_ERROR("Failed to load init function");
 		return false;
 	}
@@ -254,7 +294,6 @@ bool CountUtil::loadFunctions(void)
 		LPROFILE_ERROR("Failed to load destroy function");
 		return false;
 	}
-#endif
 	return true;
 }
 
@@ -273,67 +312,70 @@ BPatch_function *CountUtil::findFunction(
 	return tfuncs[0];
 }
 
-#ifndef USE_FUNCCNT
-bool CountUtil::insertExit(string filter)
-{
-	BPatch_Vector<BPatch_snippet *> exit_arg;
-	BPatch_Vector<BPatch_point *> *exit_point = NULL;
-	BPatchSnippetHandle *handle = NULL;
-	BPatch_Vector<BPatch_function *> funcs;
+// bool CountUtil::insertExit(void)
+// {
+// 	BPatch_Vector<BPatch_snippet *> exit_arg;
+// 	BPatch_Vector<BPatch_point *> *exit_point = NULL;
+// 	BPatchSnippetHandle *handle = NULL;
+// 	BPatch_Vector<BPatch_function *> funcs;
+// 	BPatch_module *mainmod = NULL;
 
-	BPatch_funcCallExpr exit_expr(*func_exit, exit_arg);
+// 	BPatch_funcCallExpr exit_expr(*func_exit, exit_arg);
 
-	/* insert global exiting function */
-	as->getImage()->findFunction("^_fini", funcs);
-	for (unsigned int i = 0; i < funcs.size(); i++) {
-		BPatch_module *mod = funcs[i]->getModule();
+// 	/* insert global exiting function */
+// 	as->getImage()->findFunction("^_fini", funcs);
+// 	mainmod = findMainModule();
 
-		if (filter.size() > 0 &&
-				filter.compare(mod->getObject()->name().c_str()))
-			continue;
+// 	if (mainmod == NULL) {
+// 		return false;
+// 	}
 
-		LPROFILE_INFO("Insert exit function to %s",
-						mod->getObject()->name().c_str());
-		handle = mod->getObject()->insertFiniCallback(exit_expr);
-		if (!handle) {
-			LPROFILE_ERROR("Failed to insert exit function to %s",
-							mod->getObject()->name().c_str());
-			return false;
-		}
-		target_funcs.push_back(TargetFunc(funcs[i], UINT_MAX));
-	}
+// 	for (unsigned int i = 0; i < funcs.size(); i++) {
+// 		BPatch_module *mod = funcs[i]->getModule();
 
-	/* insert per-thread exiting function */
-	funcs.clear();
-	as->getImage()->findFunction("^pthread_exit", funcs);
-	if (funcs.size() == 0) {
-		LPROFILE_INFO("No pthread_exit found");
-		return true;
-	}
+// 		if (mod->isSharedLib())
+// 			continue;
+		
+// 		if (mod != mainmod)
+// 			continue;
 
-	exit_point = funcs[0]->findPoint(BPatch_entry);
-	if (!exit_point) {
-		LPROFILE_ERROR("Failed to find point for pthread_exit");
-		return true;
-	}
+// 		LPROFILE_INFO("Insert exit function to %s",
+// 						mod->getObject()->name().c_str());
+// 		handle = mod->insertFiniCallback(exit_expr);
+// 		if (!handle) {
+// 			LPROFILE_ERROR("Failed to insert exit function to %s",
+// 							mod->getObject()->name().c_str());
+// 			return false;
+// 		}
+// 		target_funcs.push_back(TargetFunc(funcs[i], UINT_MAX, mod->getObject()));
+// 		break;
+// 	}
 
-	BPatch_funcCallExpr thread_exit_expr(*func_texit, exit_arg);
+// 	// /* insert per-thread exiting function */
+// 	// funcs.clear();
+// 	// as->getImage()->findFunction("^pthread_exit", funcs);
+// 	// if (funcs.size() == 0) {
+// 	// 	LPROFILE_INFO("No pthread_exit found");
+// 	// 	return true;
+// 	// }
 
-	handle = as->insertSnippet(thread_exit_expr,
-					*exit_point, BPatch_callBefore);
-	if (!handle) {
-		LPROFILE_ERROR("Failed to insert thread exit function");
-		return false;
-	}
+// 	// exit_point = funcs[0]->findPoint(BPatch_entry);
+// 	// if (!exit_point) {
+// 	// 	LPROFILE_ERROR("Failed to find point for pthread_exit");
+// 	// 	return true;
+// 	// }
 
-	return true;
-}
-#else
-bool CountUtil::insertExit(LPROFILE_UNUSED string filter)
-{
-	return true;
-}
-#endif // USE_FUNCCNT
+// 	// BPatch_funcCallExpr thread_exit_expr(*func_texit, exit_arg);
+
+// 	// handle = as->insertSnippet(thread_exit_expr,
+// 	// 				*exit_point, BPatch_callBefore);
+// 	// if (!handle) {
+// 	// 	LPROFILE_ERROR("Failed to insert thread exit function");
+// 	// 	return false;
+// 	// }
+
+// 	return true;
+// }
 
 void CountUtil::calculateRange(void)
 {
@@ -459,3 +501,69 @@ void CountUtil::buildInitArgs(vector<BPatch_snippet *> &args)
 	args.push_back(new BPatch_constExpr(freq));
 }
 #endif // USE_FUNCCNT
+
+SymtabAPI::Symbol *CountUtil::findHookSymbol(BPatch_function *func_wrap, string orgname)
+{
+
+	SymtabAPI::Symtab *symtab = NULL;
+	vector<SymtabAPI::Symbol *> symlist;
+	int i = 0;
+	ParseAPI::Function *ifunc = Dyninst::ParseAPI::convert(func_wrap);
+	ParseAPI::SymtabCodeSource *src = dynamic_cast<ParseAPI::SymtabCodeSource *>(ifunc->obj()->cs());
+	string symname = "HOOK_" + orgname;
+
+	if (!src) {
+		LPROFILE_ERROR("Error: wrapper function created from non-SymtabAPI code source");
+		return NULL;
+	}
+
+	symtab = src->getSymtabObject();
+
+	if (symtab->findSymbol(symlist, symname, SymtabAPI::Symbol::ST_UNKNOWN,
+							SymtabAPI::anyName, false, false, true)) {
+		return symlist[0];
+	}
+
+	LPROFILE_ERROR("Failed to find hook symbol %s", symname.c_str());
+	return NULL;
+}
+
+bool CountUtil::wrapFunction(string funcstr)
+{
+	BPatch_function *func_orig = NULL, *func_wrap = NULL;
+	BPatch_Vector<BPatch_function *> tfuncs;
+	string tmp = "^" + funcstr;
+	SymtabAPI::Symbol *hooksym = NULL;
+	BPatch_Vector<BPatch_object *> tmods;
+
+	as->getImage()->findFunction(tmp.c_str(), tfuncs);
+	if (tfuncs.size() == 0) {
+		LPROFILE_ERROR("Func %s is not found", tmp.c_str());
+		return false;
+	}
+	func_orig = tfuncs[0];
+
+	tmp = "^lprobe_" + funcstr;
+	tfuncs.clear();
+	libcnt->findFunction(tmp.c_str(), tfuncs);
+	if (tfuncs.size() == 0) {
+		LPROFILE_ERROR("Func %s is not found", tmp.c_str());
+		return false;
+	}
+	func_wrap = tfuncs[0];
+
+	hooksym = findHookSymbol(func_wrap, funcstr);
+	if (!hooksym) {
+		LPROFILE_ERROR("Hook symbol for %s is not found",
+				funcstr.c_str());
+		return false;
+	}
+
+	getUserObjs(tmods);
+
+	if (!as->wrapDynFunction(func_orig, func_wrap, hooksym, tmods)) {
+		LPROFILE_ERROR("Failed to wrap function %s", funcstr.c_str());
+		return false;
+	}
+	return true;
+}

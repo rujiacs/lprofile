@@ -12,7 +12,7 @@
 
 #include "test.h"
 
-#define FUNCMAP_DIR "/home/jr/profile/lprofile/lprofile_cache/funcmap/"
+#define FUNCMAP_DIR "/home/jiaru/lprofile/lprofile_cache/funcmap/"
 #define FUNCMAP_PREFIX "LPROFILE_WRAP_";
 
 #define FUNC_NAME_MAX 256

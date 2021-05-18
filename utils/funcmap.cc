@@ -392,6 +392,7 @@ bool FuncMap::updateCache(void)
 	LPROFILE_INFO("Update cache %s", cachefile.c_str());
 	for (unsigned i = 0; i < funcs.size(); i++)
 		fprintf(file, "%s\n", funcs[i].c_str());
+	fclose(file);
 	return true;
 }
 

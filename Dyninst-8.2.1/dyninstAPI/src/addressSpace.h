@@ -333,6 +333,12 @@ class AddressSpace : public InstructionSource {
 	void replaceCalleePostPatch(func_instance *original,
 					func_instance *wrapper, SymtabAPI::Symbol *hook);
 
+   bool wrapDynFunction(func_instance *original, func_instance *wrapper,
+					SymtabAPI::Symbol *hook, vector<mapped_object *>tmods);
+	void wrapDynFunctionPostPatch(func_instance *original,
+					func_instance *wrapper, SymtabAPI::Symbol *hook,
+               vector<mapped_object *>tmods);
+
     bool wrapFunction(func_instance *original, 
                       func_instance *wrapper, 
                       SymtabAPI::Symbol *clone);
@@ -566,6 +572,19 @@ class AddressSpace : public InstructionSource {
 
     std::map<func_instance *, Dyninst::SymtabAPI::Symbol *> wrappedFunctionWorklist_;
     std::map<func_instance *, std::pair<func_instance *, Dyninst::SymtabAPI::Symbol *>> calleeWorklist_;
+
+    class DynWrapper {
+       public:
+         func_instance *wrapper;
+         Dyninst::SymtabAPI::Symbol *hook;
+         vector<mapped_object *> tmods;
+
+         DynWrapper() : wrapper(NULL), hook(NULL) {};
+
+         DynWrapper(func_instance *w, Dyninst::SymtabAPI::Symbol *h, vector<mapped_object *> tm)
+               : wrapper(w), hook(h), tmods(tm) {};      
+    };
+    std::map<func_instance *, DynWrapper> wrappedDynFunction_;
 
   // PatchAPI stuffs
   public:

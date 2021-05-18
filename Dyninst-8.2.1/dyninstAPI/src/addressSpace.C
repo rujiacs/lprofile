@@ -1633,6 +1633,69 @@ void AddressSpace::replaceCalleePostPatch(func_instance *original,
 	}
 }
 
+bool AddressSpace::wrapDynFunction(func_instance *original,
+				func_instance *wrapper, SymtabAPI::Symbol *hook,
+            vector<mapped_object *> tmods)
+{
+	if (!original) return false;
+	if (!wrapper) return false;
+
+	if (original->proc() != this)
+		return original->proc()->wrapDynFunction(original, wrapper, hook, tmods);
+	assert(original->proc() == this);
+
+	// fprintf(stdout, "[%s][%d]: add replacement(%s:%lx -> %s:%lx, hook %s) to worklist\n",
+	// 				__FILE__, __LINE__,
+	// 				original->name().c_str(), original->addr(),
+	// 				wrapper->name().c_str(), wrapper->addr(),
+	// 				hook->getMangledName().c_str());
+   DynWrapper dw(wrapper, hook, tmods);
+   wrappedDynFunction_[original] = dw;
+	return true;
+}
+
+void AddressSpace::wrapDynFunctionPostPatch(func_instance *original,
+				func_instance *wrapper, SymtabAPI::Symbol *hook, vector<mapped_object *> tmods)
+{
+	
+
+	// replace the hook symbol with original function via PLT modification
+	for (unsigned i = 0; i < tmods.size(); ++i) {
+      // fprintf(stdout, "[%s][%d]: obj %s handle replacement(%s:%lx -> %s:%lx, hook %s)\n",
+		// 			__FILE__, __LINE__,
+      //          tmods[i]->fullName().c_str(),
+		// 			original->name().c_str(), original->addr(),
+		// 			wrapper->name().c_str(), wrapper->addr(),
+		// 			hook->getMangledName().c_str());
+		tmods[i]->replacePLTStub(hook, original, original->addr());
+	}
+
+	// check the type of original function
+	SymtabAPI::Symbol *origsym = NULL;
+	
+	origsym = original->obj()->parse_img()->symbol_info(original->name());
+	if (!origsym) {
+		fprintf(stderr, "[%s][%d]: failed to find symbol for original function %s\n",
+						__FILE__, __LINE__, original->name().c_str());
+		return;
+	}
+
+	// fprintf(stdout, "[%s][%d]: symbol(%s) dynamic %u, bind %u\n",
+	// 				__FILE__, __LINE__, original->name().c_str(),
+	// 				origsym->isInDynSymtab(), origsym->getLinkage());
+
+	if (origsym->getLinkage() == SymtabAPI::Symbol::SL_GLOBAL ||
+					origsym->getLinkage() == SymtabAPI::Symbol::SL_WEAK) {
+
+		for (unsigned i = 0; i < tmods.size(); ++i) {
+			if (tmods[i] == original->obj())
+				continue;
+			tmods[i]->replacePLTStub(origsym, original, wrapper->addr());
+		}
+	}
+}
+
+
 bool AddressSpace::wrapFunction(func_instance *original, 
                                 func_instance *wrapper,
                                 SymtabAPI::Symbol *clone) {
@@ -1789,6 +1852,12 @@ bool AddressSpace::relocate() {
  	  replaceCalleePostPatch(foo->first, foo->second.first, foo->second.second);
   }
   calleeWorklist_.clear();
+
+  for (std::map<func_instance *, DynWrapper>::iterator foo = wrappedDynFunction_.begin();
+				  foo != wrappedDynFunction_.end(); ++foo) {
+ 	  wrapDynFunctionPostPatch(foo->first, foo->second.wrapper, foo->second.hook, foo->second.tmods);
+  }
+  wrappedDynFunction_.clear();
 
   return ret;
 }

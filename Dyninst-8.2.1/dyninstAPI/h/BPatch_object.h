@@ -128,6 +128,8 @@ class BPATCH_DLL_EXPORT BPatch_object {
     // By design, shared libraries contain a single module; executable files contain one or more. 
     void modules(std::vector<BPatch_module *> &modules);
 
+    mapped_object *lowlevel_obj(void) { return obj; };
+    
     // BPatch_object::findFunction
     // Returns a vector of functions matching the provided name
     // Maps this operation over its contained modules
