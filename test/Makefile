@@ -4,7 +4,7 @@ libklargest.so: klargest.cpp
 	g++ -g -shared -fPIC -o $@ $^
 
 test: main.cpp
-	g++ -g -L. -o $@ $^ -lklargest
+	g++ -g -L. -o $@ $^ -lklargest -lpthread
 
 clean:
 	rm -f *.o *.so test
