@@ -87,7 +87,7 @@ void SimpleTest::findTarget(const char *targ)
 						mods[i]->getObject()->name().c_str());
 
 		funcs.clear();
-		mods[i]->getProcedures(funcs);
+		mods[i]->getProcedures(funcs, true);
 		
 		for (size_t j = 0; j < funcs.size(); j++) {
 			LPROFILE_INFO("%s", funcs[j]->getName().c_str());
