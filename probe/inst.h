@@ -2,7 +2,6 @@
 #define _PROFILE_INST_H_
 
 #define _GNU_SOURCE
-
 /*
  * both i386 and x86_64 returns 64-bit value in edx:eax, but gcc's "A"
  * constraint has different meanings. For i386, "A" means exactly
@@ -38,26 +37,17 @@ static __always_inline unsigned long long rdtsc(void)
 	return EAX_EDX_VAL(val, low, high);
 }
 
-static inline unsigned long long native_read_pmc(int counter)
-{
-	DECLARE_ARGS(val, low, high);
+static inline unsigned long long rdpmc(unsigned int counter) {
 
-	asm volatile("rdpmc" : EAX_EDX_RET(val, low, high) : "c" (counter));
-	return EAX_EDX_VAL(val, low, high);
+	unsigned int low, high;
+
+	__asm__ volatile("rdpmc" : "=a" (low), "=d" (high) : "c" (counter));
+
+	return (unsigned long long)low | ((unsigned long long)high) <<32;
 }
 
-#define rdpmc(counter, low, high)				\
-do {											\
-	u64 _l = native_read_pmc((counter));		\
-	(low) = (u32)_l;							\
-	(high) = (u32)(_l >> 32);					\
-} while (0)
+#define barrier() __asm__ volatile("" ::: "memory")
 
-#define rdpmcl(counter, val) ((val) = native_read_pmc(counter))
 
-static inline void barrier(void)
-{
-	asm volatile("":::"memory");
-}
 
 #endif /* _PROFILE_INST_H_  */

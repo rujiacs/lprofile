@@ -7,30 +7,43 @@
 #include <sys/types.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <dirent.h>
 
 #include "util.h"
+#include "inst.h"
 #include "list.h"
 #include "evlist.h"
 #include "threadmap.h"
 #include "profile.h"
 #include "probe.h"
 
+unsigned tid_offset = UINT32_MAX;
+
 struct prof_info globalinfo = {
-	.evlist = NULL,
+	.is_trace = 0,
+	.evlist_str = NULL,
+	.is_error = 0,
 	.min_index = UINT_MAX,
 	.max_index = 0,
 	.sample_freq = 0,
 	.flog = NULL,
+	.threads = {
+		{
+			.tid = 0,
+			.state = PROF_STATE_UNINIT,
+			.output_file = NULL,
+			.func_counters = NULL,
+			.nb_record = 0,
+		}
+	},
+	.thread_nb = 0,
+	.thread_nid = 0,
+	.thread_lock = PTHREAD_MUTEX_INITIALIZER,
 };
 
-__thread struct prof_tinfo tinfo = {
-	.pid = -1,
-	.tid = -1,
-	.state = PROF_STATE_UNINIT,
-	.func_counters = NULL,
-	.nb_record = 0,
-//	.records = NULL,
-};
+static __thread struct prof_tinfo *threadinfo = NULL;
+static __thread uint8_t is_ignore = 0;
+static __thread int threadid = -1;
 
 static char *log_tag[PROF_LOG_NUM] = {
 	[PROF_LOG_ERROR] = "ERROR",
@@ -51,7 +64,7 @@ void prof_log(uint8_t level, const char *format, ...)
 	else
 		fout = stdout;
 
-	fprintf(fout, "[%s][%d]: ", log_tag[level], tinfo.pid);
+	fprintf(fout, "[%s][%d]: ", log_tag[level], threadid);
 	va_start(va, format);
 	vfprintf(fout, format, va);
 	va_end(va);
@@ -60,32 +73,56 @@ void prof_log(uint8_t level, const char *format, ...)
 	fflush(fout);
 }
 
+static inline void __update_threadnid(struct prof_info *info)
+{
+	unsigned cur_id = info->thread_nid;
+	unsigned nxt_id = PROF_THREAD_MAX, i;
+
+	if (info->thread_nb >= PROF_THREAD_MAX) {
+		info->thread_nid = UINT_MAX;
+		return;
+	}
+	
+	for (i = 1; i < PROF_THREAD_MAX; i++) {
+		nxt_id = (cur_id + i) % PROF_THREAD_MAX;
+
+		if (info->threads[nxt_id].tid == 0) {
+			info->thread_nid = nxt_id;
+			return;
+		}
+	}
+}
+
+static inline struct prof_tinfo *__find_tinfo(int pid)
+{
+	int i;
+
+	for (i = 0; i < PROF_THREAD_MAX; i++) {
+		if (globalinfo.threads[i].tid == pid) {
+			return &globalinfo.threads[i];
+		}
+	}
+	return NULL;
+}
+
 static int __create_evlist(struct prof_info *info,
-				char *evlist_str, int pid)
+							struct prof_tinfo *tinfo)
 {
 	struct prof_evlist *evlist = NULL;
 
-	evlist = prof_evlist__new();
+	evlist = prof_evlist__new(tinfo->tid);
 	if (!evlist) {
 		LOG_ERROR("Failed to create evlist (%s) for process %d",
-						evlist_str, pid);
+						info->evlist_str, tinfo->tid);
 		return -1;
 	}
 
 	// parse and add events
-	if (prof_evlist__add_from_str(evlist, evlist_str) < 0) {
-		LOG_ERROR("Wrong event list %s", evlist_str);
+	if (prof_evlist__add_from_str(evlist, info->evlist_str) < 0) {
+		LOG_ERROR("Wrong event list %s", info->evlist_str);
 		goto fail_destroy_evlist;
 	}
-	LOG_INFO("Add %d events", evlist->nr_entries);
-
-	// create threadmap
-	if (prof_evlist__create_threadmap(evlist, pid) < 0) {
-		LOG_ERROR("Failed to create thread map");
-		goto fail_destroy_evlist;
-	}
-	LOG_INFO("%d threads detected.",
-					thread_map__nr(evlist->threads));
+	LOG_DEBUG("Add %d events", evlist->nr_entries);
 
 	// start all events
 	if (prof_evlist__start(evlist) < 0) {
@@ -93,7 +130,8 @@ static int __create_evlist(struct prof_info *info,
 		goto fail_destroy_evlist;
 	}
 
-	info->evlist = evlist;
+	tinfo->evlist = evlist;
+	tinfo->state = PROF_STATE_RUNNING;
 	return 0;
 
 fail_destroy_evlist:
@@ -101,116 +139,105 @@ fail_destroy_evlist:
 	return -1;
 }
 
-#if 0
-static int __init_record(struct prof_tinfo *local)
+static void __init_thread(unsigned id)
 {
-	int fd = -1, ret = 0;
-	char buf[32] = {'\0'};
-	size_t size;
-	void *ptr = NULL;
+	struct prof_info *info = &globalinfo;
+	struct prof_tinfo *tinfo = &(info->threads[id]);
+	LOG_DEBUG("init thread[%u] %d: %p", id, tinfo->tid, (void*)tinfo);
 
-	snprintf(buf, 32, "prof_%d.data", local->pid);
-
-	size = sizeof(struct prof_record) * PROF_RECORD_MAX;
-
-	fd = open(buf, O_RDWR | O_CREAT, 0666);
-	if (fd < 0) {
-		LOG_ERROR("Failed to create record file %s, err %d",
-						buf, errno);
-		return -1;
+	if (__create_evlist(info, tinfo) != 0) {
+		LOG_ERROR("Failed to create evlist");
+		tinfo->state = PROF_STATE_ERROR;
 	}
-
-	ret = ftruncate(fd, size);
-	if (ret < 0) {
-		LOG_ERROR("Failed to resize the record file %s, err %d",
-						buf, errno);
-		close(fd);
-		return -1;
-	}
-
-	ptr = mmap(0, size, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
-	if (ptr == MAP_FAILED) {
-		LOG_ERROR("Failed to mmap record file %s, err %d",
-						buf, errno);
-		close(fd);
-		return -1;
-	}
-	memset(ptr, 0, size);
-
-	local->records = ptr;
-	return 0;
-}
-#endif
-
-static void __init_thread(void)
-{
-	struct prof_evlist *evlist = globalinfo.evlist;
-	struct prof_tinfo *info = &tinfo;
-	unsigned int nb_funcs = globalinfo.max_index - globalinfo.min_index + 1;
-
-	info->pid = syscall(__NR_gettid);
-	info->tid = thread_map__getindex(evlist->threads, info->pid);
-	if (info->tid == -1) {
-		LOG_ERROR("No thread %d found in threadmap", info->pid);
-		info->state = PROF_STATE_ERROR;
-		return;
-	}
-
-	// allocate counter
-	info->func_counters = (struct prof_func *)malloc(
-					sizeof(struct prof_func) * nb_funcs);
-	if (!info->func_counters) {
-		LOG_ERROR("Failed to allocate memory for function counters,"
-				  "its desired length is %u",
-				  nb_funcs);
-		info->state = PROF_STATE_ERROR;
-		return;
-	}
-	LOG_INFO("Create %u function counters [%u-%u]",
-					nb_funcs,
-					globalinfo.min_index,
-					globalinfo.max_index);
-
-	// open data file
-	char buf[32] = {'\0'};
-
-	sprintf(buf, "profile_%d.data", info->pid);
-	info->output_file = fopen(buf, "w");
-	if (!info->output_file) {
-		free(info->func_counters);
-		info->func_counters = NULL;
-		info->state = PROF_STATE_ERROR;
-		LOG_ERROR("Failed to open data file %s", buf);
-		return;
-	}
-	LOG_INFO("Data file %s", buf);
-
-	memset(info->func_counters, 0, sizeof(struct prof_func) * nb_funcs);
-
-	memset(info->records, 0, sizeof(struct prof_record) * PROF_RECORD_CACHE);
-//	// allocate record storage
-//	if (__init_record(info) < 0) {
-//		LOG_ERROR("Failed to init record storage");
-//		free(info->func_counters);
-//		info->func_counters = NULL;
-//		info->state = PROF_STATE_ERROR;
-//		return;
-//	}
-
-
-	tinfo.state = PROF_STATE_RUNNING;
-	LOG_INFO("Thread %d index %d, address %p",
-					tinfo.pid, tinfo.tid, info);
-	return;
 }
 
-void lprobe_thread_init(void)
+void lprobe_thread_init(void *p)
 {
-	struct prof_tinfo *info = &tinfo;
+	pthread_t tid = ((pthread_t *)p)[0];
+	void *ptr = (void *)(uintptr_t)tid;
+	pid_t pid = ((pid_t *)(ptr + tid_offset))[0];
 
-	info->pid = syscall(__NR_gettid);
+	struct prof_info *info = &globalinfo;
+	struct prof_tinfo *tinfo = NULL;
 
-	LOG_INFO("INIT thread %d", info->pid);
+	if (info->thread_nid == UINT32_MAX) {
+		LOG_WARN("New thread %d arrived, but we don't have enough"
+				"space for it.", pid);
+		return;
+	}
+
+	pthread_mutex_lock(&info->thread_lock);
+	tinfo = &(info->threads[info->thread_nid]);
+	tinfo->tid = pid;
+	info->thread_nb ++;
+	__init_thread(info->thread_nid);
+	__update_threadnid(info);
+	pthread_mutex_unlock(&info->thread_lock);
+}
+
+int lprobe_pthread_create(void *p1, void *p2, void *p3, void *p4)
+{
+	int ret = NULL;
+
+	ret = HOOK_pthread_create(p1, p2, p3, p4);
+	if (!ret) {
+		lprobe_thread_init(p1);
+	}
+	return ret;
+}
+
+/* Skip "." and ".." directories */
+static int __filter(const struct dirent *dir)
+{
+	if (dir->d_name[0] == '.')
+		return 0;
+	else
+		return 1;
+}
+
+void __scan_threads(int pid, struct prof_info *info)
+{
+	char name[256] = {'\0'};
+	int items, nb_thread;
+	struct dirent **namelist = NULL;
+	int i;
+
+	sprintf(name, "/proc/%d/task", pid);
+	items = scandir(name, &namelist, __filter, NULL);
+	if (items <= 0) {
+		struct prof_tinfo *tinfo = NULL;
+
+		tinfo = &(info->threads[info->thread_nid]);
+		tinfo->tid = pid;
+		info->thread_nb ++;
+		__init_thread(info->thread_nid);
+		__update_threadnid(info);
+		
+	}
+	else {
+		nb_thread = items;
+		if (items > PROF_THREAD_MAX) {
+			LOG_WARN("Detect %d threads, only the first %d will be measured",
+						items, PROF_THREAD_MAX);
+			nb_thread = PROF_THREAD_MAX;
+		}
+
+		for (i = 0; i < nb_thread; i++) {
+			struct prof_tinfo *tinfo = NULL;
+
+			tinfo = &(info->threads[info->thread_nid]);
+			tinfo->tid = atoi(namelist[i]->d_name);
+			if (tinfo->tid > 0) {
+				info->thread_nb ++;
+				__init_thread(info->thread_nid);
+				__update_threadnid(info);
+			}
+		}
+	}
+
+	for (i = 0; i < items; i++)
+		free(namelist[i]);
+	free(namelist);
 }
 
 void *lprobe_init(char *evlist_str, char *logfile,
@@ -218,35 +245,49 @@ void *lprobe_init(char *evlist_str, char *logfile,
 {
 	int pid;
 	struct prof_info *info = &globalinfo;
-	FILE *fp = NULL;
-	char buf[32] = {'\0'};
-
+	// FILE *fp = NULL;
+	// char buf[32] = {'\0'};
+	
 	pid = getpid();
-	tinfo.pid = syscall(__NR_gettid);
-//	INIT_LIST_HEAD(&info->thread_data);
+	threadid = pid;
 	info->max_index = max_id;
 	info->min_index = min_id;
 	info->sample_freq = freq;
+	info->evlist_str = strdup(evlist_str);
+	// if (strlen(logfile) == 0)
+	// 	snprintf(buf, 32, "prof_%d.log", pid);
+	// else
+	// 	snprintf(buf, 32, "%s", logfile);
+	
+	// fp = fopen(buf, "w");
+	// if (!fp) {
+	// 	LOG_ERROR("Failed to open log file %s, using stdout/stderr",
+	// 					buf);
+	// 	return (void *)-1;
+	// }
+	// LOG_INFO("Create log file %s", buf);
+	// info->flog = fp;
 
-	if (strlen(logfile) == 0)
-		snprintf(buf, 32, "prof_%d.log", pid);
-	else
-		snprintf(buf, 32, "%s", logfile);
-
-	fp = fopen(buf, "w");
-	if (!fp) {
-		LOG_ERROR("Failed to open log file %s, using stdout/stderr",
-						buf);
-		return (void *)-1;
-	}
-	LOG_INFO("Create log file %s", buf);
-	info->flog = fp;
-
-	LOG_INFO("Create event list %s", evlist_str);
-	if (__create_evlist(info, evlist_str, pid) < 0) {
-		LOG_ERROR("Failed to create event list %s", evlist_str);
+	if (pthread_mutex_init(&info->thread_lock, NULL) != 0) {
+		LOG_ERROR("Failed to init thread mutex");
 		goto fail_close_log;
 	}
+
+	/* scan threads */
+	__scan_threads(pid, info);
+
+	threadinfo = __find_tinfo(pid);
+	if (threadinfo->state == PROF_STATE_ERROR) {
+		LOG_ERROR("Failed to init master thread %d", pid);
+		goto fail_close_log;
+	}
+
+
+	// LOG_INFO("Create event list %s", evlist_str);
+	// if (__create_evlist(info, evlist_str, pid) < 0) {
+	// 	LOG_ERROR("Failed to create event list %s", evlist_str);
+	// 	goto fail_close_log;
+	// }
 
 //	// init current thread
 //	__init_thread();
@@ -256,155 +297,136 @@ void *lprobe_init(char *evlist_str, char *logfile,
 fail_close_log:
 	fclose(info->flog);
 	info->flog = NULL;
+	info->is_error = 1;
 
 	return (void *)-1;
 }
 
-#if 1
-static void __test_print(struct prof_info *global, struct prof_tinfo *thread)
-{
-	struct prof_func *func = NULL;
-	unsigned int i = 0, nb_func = global->max_index - global->min_index + 1;
-
-	if (!thread->func_counters)
-		return;
-
-	for (i = 0; i < nb_func; i++) {
-		func = &thread->func_counters[i];
-		if (func->counter == 0)
-			continue;
-
-		LOG_INFO("func %u: %u", global->min_index + i, func->counter);
-	}
-}
-#endif
-
 void lprobe_thread_exit(void)
 {
-	struct prof_tinfo *local = &tinfo;
 
-	LOG_INFO("Destroy per-thread data");
-	if (local->func_counters) {
-		__test_print(&globalinfo, local);
-		free(local->func_counters);
-		local->func_counters = NULL;
-	}
-
-	// write data to file
-	LOG_INFO("%u records", local->nb_record);
-	if (local->nb_record && local->output_file) {
-		fwrite(local->records, sizeof(struct prof_record), local->nb_record,
-						local->output_file);
-		local->nb_record = 0;
-	}
-
-	// close output file
-	if (local->output_file)
-		fclose(local->output_file);
-//	if (local->records) {
-//		munmap(local->records, PROF_RECORD_MAX * sizeof(struct prof_record));
-//		local->records = NULL;
-//	}
 }
 
-static void __destroy_evlist(void)
+void lprobe_pthread_exit(void *p)
 {
-	struct prof_evlist *evlist = globalinfo.evlist;
+	HOOK_pthread_exit(p);
+	lprobe_thread_exit();
+}
 
-	if (!evlist)
-		return;
-
-	prof_evlist__delete(evlist);
-	globalinfo.evlist = NULL;
+static void __destroy_tinfo(struct prof_tinfo *tinfo)
+{
+	LOG_INFO("Destroy thread data for %d", tinfo->tid);
+	if (tinfo->evlist) {
+		prof_evlist__delete(tinfo->evlist);
+		tinfo->evlist = NULL;
+	}
+	tinfo->tid = -1;
+	tinfo->state = PROF_STATE_UNINIT;
 }
 
 void lprobe_exit(void)
 {
+	struct prof_info *info = &globalinfo;
+	int i = 0;
+
 	LOG_INFO("Profile exit.");
+	if (info->is_error)
+		return;
 
-	//prof_thread_exit();
-	__destroy_evlist();
-
-	if (globalinfo.flog) {
-		fclose(globalinfo.flog);
-		globalinfo.flog = NULL;
+	if (info->flog) {
+		fclose(info->flog);
+		info->flog = NULL;
 	}
-}
+	pthread_mutex_destroy(&info->thread_lock);
 
-#if 1
-static void __read_count(struct prof_evlist *evlist,
-				unsigned int func_index, struct prof_tinfo *local)
-{
-	struct prof_evsel *evsel = NULL;
-	uint8_t i = 0;
+	for (i = 0; i < PROF_THREAD_MAX; i++) {
+		struct prof_tinfo *tinfo = &info->threads[i];
 
-	evlist__for_each(evlist, evsel) {
-//		prof_evsel__rdpmc(evsel, local->tid);
-		local->records[local->nb_record].func_idx = func_index;
-		local->records[local->nb_record].ev_idx = i;
-		local->records[local->nb_record].count = prof_evsel__rdpmc(evsel, local->tid);
-//		local->records[local->nb_record].count = prof_evsel__read(evsel, local->tid);
-		i++;
-		local->nb_record ++;
-//		if (local->nb_record == PROF_RECORD_MAX) {
-//			local->state = PROF_STATE_STOP;
-//			break;
-//		}
-		if (local->nb_record == PROF_RECORD_CACHE) {
-//			fwrite(local->records, sizeof(struct prof_record),
-//							local->nb_record, local->output_file);
-			local->nb_record = 0;
+		if (tinfo->tid == -1)
+			continue;
+		if (tinfo->state == PROF_STATE_RUNNING) {
+			__destroy_tinfo(tinfo);
 		}
 	}
 }
-#endif
+
+static void __read_count(unsigned int func_index, uint8_t is_post,
+						struct prof_tinfo *local)
+{
+	struct prof_evsel *evsel = NULL;
+	uint8_t i = 0;
+	uint64_t count = 0, cyc = 0;
+
+	cyc = rdtsc();
+	LOG_DEBUG("cyc %llu", cyc);
+
+	evlist__for_each(local->evlist, evsel) {
+		count = prof_evsel__rdpmc(evsel);
+		LOG_DEBUG("func[%u], %u, %lu, cyc %llu",
+				func_index, is_post, count, cyc);
+// 		local->records[local->nb_record].func_idx = func_index;
+// 		local->records[local->nb_record].ev_idx = i;
+// 		local->records[local->nb_record].count = prof_evsel__rdpmc(evsel, local->tid);
+// //		local->records[local->nb_record].count = prof_evsel__read(evsel, local->tid);
+// 		i++;
+// 		local->nb_record ++;
+// //		if (local->nb_record == PROF_RECORD_MAX) {
+// //			local->state = PROF_STATE_STOP;
+// //			break;
+// //		}
+// 		if (local->nb_record == PROF_RECORD_CACHE) {
+// //			fwrite(local->records, sizeof(struct prof_record),
+// //							local->nb_record, local->output_file);
+// 			local->nb_record = 0;
+// 		}
+	}
+}
 
 void lprobe_func_entry(unsigned int func_index)
 {
-	struct prof_info *global = &globalinfo;
-	struct prof_tinfo *local = &tinfo;
-//	struct prof_func *func = NULL;
-
-	if (local->state == PROF_STATE_UNINIT)
-		__init_thread();
-
-	if (local->state != PROF_STATE_RUNNING)
+	if (is_ignore)
 		return;
+	
+	if (threadinfo == NULL) {
+		LOG_DEBUG("First enter");
+		threadid = syscall(__NR_gettid);
+		threadinfo = __find_tinfo(threadid);
+		if (threadinfo == NULL) {
+			is_ignore = 1;
+			LOG_INFO("No tinfo found for %d", threadid);
+			return;
+		}
+		is_ignore = 0;
+		LOG_DEBUG("Thread %d start, tinfo %p", threadid, threadinfo);
+	}
 
-//	func = &local->func_counters[func_index - global->min_index];
-//	if (func->depth < PROF_FUNC_STACK_MAX) {
-//		func->stack[func->depth] = func->counter;
-//		func->counter ++;
-
-		__read_count(global->evlist, func_index, local);
-//	}
-//	func->depth ++;
+	if (threadinfo->state != PROF_STATE_RUNNING)
+		return;
+	LOG_DEBUG("FUNC %u enter", func_index);
+	__read_count(func_index, 0, threadinfo);
 }
 
 void lprobe_func_exit(unsigned int func_index)
 {
-	struct prof_info *global = &globalinfo;
-	struct prof_tinfo *local = &tinfo;
-//	struct prof_func *func = NULL;
-//	unsigned int cnt = 0;
-
-	if (local->state != PROF_STATE_RUNNING)
+	if (is_ignore)
 		return;
-
-//	func = &local->func_counters[func_index - global->min_index];
-//	func->depth --;
-//	if (func->depth < PROF_FUNC_STACK_MAX) {
-//		cnt = func->counter[func->deep];
-		__read_count(global->evlist, func_index, local);
-//	}
+	
+	if (threadinfo == NULL) {
+		threadid = syscall(__NR_gettid);
+		threadinfo = __find_tinfo(threadid);
+		if (threadinfo == NULL) {
+			is_ignore = 1;
+			return;
+		}
+		is_ignore = 0;
+		LOG_INFO("Thread %d start, tinfo %p", threadid, threadinfo);
+	}
+	if (threadinfo->state != PROF_STATE_RUNNING)
+		return;
+	LOG_INFO("FUNC %u exit", func_index);
+	__read_count(func_index, 1, threadinfo);
 }
 
 void prof_dump_records(void) {
-	struct prof_tinfo *local = &tinfo;
-	unsigned int i = 0;
 
-	for (i = 0; i < local->nb_record; i++) {
-		fprintf(stdout, "%u,%lu\n",
-				local->records[i].func_idx, local->records[i].count);
-	}
 }

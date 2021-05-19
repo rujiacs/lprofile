@@ -5,33 +5,17 @@
 extern "C" {
 #endif
 
-#define PROF_EVENT_MAX	10
-
+#include <pthread.h>
 #include "list.h"
 
-struct prof_info {
-	/* Tarce or summary */
-	uint8_t is_trace;
-	/* List of events */
-	struct prof_evlist *evlist;
-	/* Min index of traced function */
-	unsigned min_index;
-	/* Max index of traced function */
-	unsigned max_index;
-	/* Sample frequency */
-	unsigned sample_freq;
-	/* log file */
-	FILE *flog;
-	/* list of per-thread data.
-	 * It's used for safely termination.
-	 */
-//	struct list_head thread_data;
-};
+#define PF_DEBUG
+
+#define PROF_EVENT_MAX	10
+#define PROF_THREAD_MAX	64
 
 enum {
 	PROF_STATE_UNINIT = 0,
 	PROF_STATE_RUNNING,
-	PROF_STATE_STOP,
 	PROF_STATE_ERROR,
 };
 
@@ -54,11 +38,13 @@ struct prof_record {
 
 // per-thread data
 struct prof_tinfo {
-//	struct list_head node;
+	// struct list_head node;
 
-	int pid;
+	// int pid;
 	int tid;
 	uint8_t state;
+
+	struct prof_evlist *evlist;
 
 	FILE *output_file;
 
@@ -68,9 +54,36 @@ struct prof_tinfo {
 	struct prof_func *func_counters;
 
 	uint32_t nb_record;
-	struct prof_record records[PROF_RECORD_CACHE];
-//	struct prof_record *records;
+	// struct prof_record records[PROF_RECORD_CACHE];
+	struct prof_record *records;
 };
+
+struct prof_info {
+	/* Tarce or summary */
+	uint8_t is_trace;
+	/* List of events */
+	const char *evlist_str;
+
+	uint8_t is_error;
+
+	// struct prof_evlist *evlist;
+	/* Min index of traced function */
+	unsigned min_index;
+	/* Max index of traced function */
+	unsigned max_index;
+	/* Sample frequency */
+	unsigned sample_freq;
+	/* log file */
+	FILE *flog;
+	/* list of per-thread data.
+	 * It's used for safely termination.
+	 */
+	struct prof_tinfo threads[PROF_THREAD_MAX];
+	unsigned thread_nb;
+	unsigned thread_nid;
+	pthread_mutex_t thread_lock;
+};
+
 
 enum {
 	PROF_LOG_ERROR = 0,

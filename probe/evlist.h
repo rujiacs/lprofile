@@ -15,11 +15,12 @@ struct prof_evlist {
 	int nr_entries;
 //	bool enabled;
 
-	struct thread_map *threads;
+	int pid;
+	// struct thread_map *threads;
 	struct prof_evsel *selected;
 };
 
-struct prof_evlist *prof_evlist__new(void);
+struct prof_evlist *prof_evlist__new(int pid);
 
 void prof_evlist__init(struct prof_evlist *evlist);
 
@@ -30,8 +31,8 @@ int prof_evlist__add_from_str(struct prof_evlist *evlist,
 
 void prof_evlist__dump(struct prof_evlist *evlist);
 
-void prof_evlist__set_threads(struct prof_evlist *evlist,
-				struct thread_map *threads);
+// void prof_evlist__set_threads(struct prof_evlist *evlist,
+// 				struct thread_map *threads);
 
 int prof_evlist__start(struct prof_evlist *evlist);
 
@@ -42,7 +43,7 @@ void prof_evlist__stop(struct prof_evlist *evlist);
 
 int prof_evlist__counter_nr(struct prof_evlist *evlist);
 
-int prof_evlist__create_threadmap(struct prof_evlist *evlist, int pid);
+// int prof_evlist__create_threadmap(struct prof_evlist *evlist, int pid);
 
 static inline struct
 prof_evsel *prof_evlist__first(struct prof_evlist *evlist)

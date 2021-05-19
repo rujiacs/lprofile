@@ -1661,11 +1661,10 @@ void AddressSpace::wrapDynFunctionPostPatch(func_instance *original,
 
 	// replace the hook symbol with original function via PLT modification
 	for (unsigned i = 0; i < tmods.size(); ++i) {
-      // fprintf(stdout, "[%s][%d]: obj %s handle replacement(%s:%lx -> %s:%lx, hook %s)\n",
+      // fprintf(stdout, "[%s][%d]: obj %s handle replacement(HOOK -> %s:%lx, hook %s)\n",
 		// 			__FILE__, __LINE__,
       //          tmods[i]->fullName().c_str(),
 		// 			original->name().c_str(), original->addr(),
-		// 			wrapper->name().c_str(), wrapper->addr(),
 		// 			hook->getMangledName().c_str());
 		tmods[i]->replacePLTStub(hook, original, original->addr());
 	}
@@ -1690,7 +1689,13 @@ void AddressSpace::wrapDynFunctionPostPatch(func_instance *original,
 		for (unsigned i = 0; i < tmods.size(); ++i) {
 			if (tmods[i] == original->obj())
 				continue;
-			tmods[i]->replacePLTStub(origsym, original, wrapper->addr());
+         // fprintf(stdout, "[%s][%d]: obj %s handle replacement(%s:%lx -> %s:%lx, hook %s)\n",
+			// 		__FILE__, __LINE__,
+         //       tmods[i]->fullName().c_str(),
+			// 		original->name().c_str(), original->addr(),
+			// 		wrapper->name().c_str(), wrapper->addr(),
+			// 		origsym->getMangledName().c_str());
+			tmods[i]->replacePLTStub(origsym, wrapper, wrapper->addr());
 		}
 	}
 }

@@ -2091,10 +2091,21 @@ void mapped_object::replacePLTStub(SymtabAPI::Symbol *sym, func_instance *orig, 
    bool ok = parse_img()->getObject()->getFuncBindingTable(fbt);
    if(!ok) return;
    
+   string symname;
+
+   if (sym->getMangledName().find("@") == string::npos)
+        symname = sym->getMangledName();
+    else {
+        symname = sym->getMangledName().substr(0,
+                        sym->getMangledName().find("@"));
+    }
    
    for (unsigned i = 0; i < fbt.size(); ++i) {
-      if (fbt[i].name() == sym->getMangledName()) {
+      if (fbt[i].name() == symname) {
          proc()->bindPLTEntry(fbt[i], codeBase(), orig, newAddr);
+         fprintf(stdout, "[%s][%d]: modify PLT entry %u (%s->%lu)\n",
+                        __FILE__, __LINE__, i, fbt[i].name().c_str(),
+                        newAddr);
       }
    }
 }

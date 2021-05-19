@@ -22,24 +22,26 @@ enum {
 	LPROFILE_MODE_EDIT,
 };
 
-#define USE_FUNCCNT
+// #define USE_FUNCCNT
 
 #define LIBCNT "/home/jiaru/lprofile/build/probe/libprobe.so"
+#define LIBTIDOFFSET "tid_offset"
 
 #ifdef USE_FUNCCNT
 #define FUNC_PRE "lprobe_func_entry_empty"
 #define FUNC_POST "lprobe_func_exit_empty"
 #define FUNC_INIT "lprobe_init_empty"
 #define FUNC_EXIT "lprobe_exit_empty"
-#define FUNC_TINIT "lprobe_thread_init_empty"
-#define FUNC_TEXIT "lprobe_thread_exit_empty"
+#define WRAP_TINIT "lprobe_empty_pthread_create"
+#define WRAP_TEXIT "lprobe_empty_pthread_exit"
 #define FUNCC_ARG "f:"
 #else
 #define FUNC_PRE "lprobe_func_entry"
 #define FUNC_POST "lprobe_func_exit"
 #define FUNC_INIT "lprobe_init"
 #define FUNC_EXIT "lprobe_exit"
-#define FUNC_TEXIT "lprobe_thread_exit"
+#define WRAP_TINIT "lprobe_pthread_create"
+#define WRAP_TEXIT "lprobe_pthread_exit"
 #define FUNCC_ARG "f:e:l:F:o:"
 #endif /* ifdef USE_FUNCCNT */
 
@@ -70,7 +72,7 @@ class CountUtil {
 #ifndef USE_FUNCCNT
 		std::string output;
 #define OUTPUT_DEF "profile.data"
-#define EVLIST_DEF "cpu-cycles"
+#define EVLIST_DEF "l1d-read-misses"
 		std::string evlist;
 #define LOGFILE_DEF "profile.log"
 		std::string logfile;
@@ -139,7 +141,9 @@ class CountUtil {
 		/* Construct the argument list for init function */
 		void buildInitArgs(std::vector<BPatch_snippet *> &args);
 
-		bool wrapFunction(std::string funcstr);
+		bool wrapFunction(std::string funcstr, BPatch_function *__wrap = NULL);
+
+		bool wrapPthreadFunc(void);
 	private:
 		/* Get all objects and filter out system libraries and
 		 * dyninst libraries */
@@ -153,6 +157,8 @@ class CountUtil {
 
 		/* Calculate range of target function indices */
 		void calculateRange(void);
+
+		uint32_t findTIDOffset(void);
 
 		Dyninst::SymtabAPI::Symbol *findHookSymbol(
 						BPatch_function *func_wrap, string orgname);

@@ -306,13 +306,8 @@ bool ProfTest::process(void)
 		return false;
 	}
 
-	if (!count.wrapFunction("pthread_create")) {
-		LPROFILE_ERROR("Failed to wrap pthread_create");
-		return false;
-	}
-
-	if (!count.wrapFunction("pthread_exit")) {
-		LPROFILE_ERROR("Failed to wrap pthread_exit");
+	if (!count.wrapPthreadFunc()) {
+		LPROFILE_ERROR("Failed to wrap pthread functions");
 		return false;
 	}
 

@@ -4,13 +4,14 @@
 #include "evsel.h"
 #include "threadmap.h"
 
-struct prof_evlist *prof_evlist__new(void)
+struct prof_evlist *prof_evlist__new(int pid)
 {
 	struct prof_evlist *evlist = NULL;
 
 	evlist = zalloc(sizeof(struct prof_evlist));
 	if (evlist != NULL)
 		prof_evlist__init(evlist);
+	evlist->pid = pid;
 
 	return evlist;
 }
@@ -29,8 +30,8 @@ void prof_evlist__delete(struct prof_evlist *evlist)
 		prof_evsel__close(evsel);
 	}
 
-	thread_map__free(evlist->threads);
-	evlist->threads = NULL;
+	// thread_map__free(evlist->threads);
+	// evlist->threads = NULL;
 
 	evsel = NULL;
 	evlist__for_each_safe(evlist, evsel, pos) {
@@ -111,19 +112,18 @@ void prof_evlist__dump(struct prof_evlist *evlist)
 	}
 }
 
-void prof_evlist__set_threads(struct prof_evlist *evlist,
-				struct thread_map *threads)
-{
-	evlist->threads = threads;
-}
+// void prof_evlist__set_threads(struct prof_evlist *evlist,
+// 				struct thread_map *threads)
+// {
+// 	evlist->threads = threads;
+// }
 
-static void prof_evlist__enable(struct prof_evlist *evlist,
-				int nthreads)
+static void prof_evlist__enable(struct prof_evlist *evlist)
 {
 	struct prof_evsel *evsel = NULL;
 
 	evlist__for_each(evlist, evsel) {
-		if (prof_evsel__enable(evsel, nthreads) < 0)
+		if (prof_evsel__enable(evsel) < 0)
 			LOG_ERROR("Failed to enable event %s", evsel->name);
 	}
 }
@@ -131,34 +131,42 @@ static void prof_evlist__enable(struct prof_evlist *evlist,
 int prof_evlist__start(struct prof_evlist *evlist)
 {
 	struct prof_evsel *evsel = NULL;
-	int nthreads = 0;
+	// int nthreads = 0;
 
-	if (!evlist->threads) {
-		LOG_ERROR("Thread map is not set");
-		return -1;
-	}
+	// if (!evlist->threads) {
+	// 	LOG_ERROR("Thread map is not set");
+	// 	return -1;
+	// }
 
-	nthreads = thread_map__nr(evlist->threads);
+	// nthreads = thread_map__nr(evlist->threads);
 	evlist__for_each(evlist, evsel) {
 		if (!evsel->is_open &&
-				prof_evsel__open(evsel, evlist->threads) < 0) {
+				prof_evsel__open(evsel, evlist->pid) < 0) {
 			LOG_ERROR("Failed to open event %s", evsel->name);
-			continue;
+			goto fail_close_evsel;
 		}
 	}
 
-	prof_evlist__enable(evlist, nthreads);
+	prof_evlist__enable(evlist);
 	return 0;
+
+fail_close_evsel:
+	evlist__for_each(evlist, evsel) {
+		if (evsel->is_open) {
+			prof_evsel__close(evsel);
+		}
+	}
+	return -1;
 }
 
 void prof_evlist__stop(struct prof_evlist *evlist)
 {
 	struct prof_evsel *evsel = NULL;
-	int nthreads = 0;
+	// int nthreads = 0;
 
-	nthreads = thread_map__nr(evlist->threads);
+	// nthreads = thread_map__nr(evlist->threads);
 	evlist__for_each(evlist, evsel) {
-		prof_evsel__disable(evsel, nthreads);
+		prof_evsel__disable(evsel);
 	}
 }
 
@@ -171,23 +179,23 @@ int prof_evlist__counter_nr(struct prof_evlist *evlist)
 }
 
 /* pid == 0 => current process */
-int
-prof_evlist__create_threadmap(struct prof_evlist *evlist,
-				int pid)
-{
-	struct thread_map *threads = NULL;
+// int
+// prof_evlist__create_threadmap(struct prof_evlist *evlist,
+// 				int pid)
+// {
+// 	struct thread_map *threads = NULL;
 
-	if (pid == 0)
-		threads = thread_map__new(getpid());
-	else
-		threads = thread_map__new(pid);
+// 	if (pid == 0)
+// 		threads = thread_map__new(getpid());
+// 	else
+// 		threads = thread_map__new(pid);
 
-	if (threads == NULL)
-		return -1;
+// 	if (threads == NULL)
+// 		return -1;
 
-	evlist->threads = threads;
-	return 0;
-}
+// 	evlist->threads = threads;
+// 	return 0;
+// }
 
 //int prof_evlist__read_all(struct prof_evlist *evlist, uint64_t *vals)
 //{

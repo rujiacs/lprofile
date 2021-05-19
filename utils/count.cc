@@ -281,7 +281,7 @@ bool CountUtil::loadFunctions(void)
 
 	LPROFILE_INFO("Load init function");
 	func_init = findFunction(libcnt, FUNC_INIT);
-	func_tinit = findFunction(libcnt, FUNC_TINIT);
+	func_tinit = findFunction(libcnt, WRAP_TINIT);
 	if (!func_init || !func_tinit) {
 		LPROFILE_ERROR("Failed to load init function");
 		return false;
@@ -289,7 +289,7 @@ bool CountUtil::loadFunctions(void)
 
 	LPROFILE_INFO("Load exit function");
 	func_exit = findFunction(libcnt, FUNC_EXIT);
-	func_texit = findFunction(libcnt, FUNC_TEXIT);
+	func_texit = findFunction(libcnt, WRAP_TEXIT);
 	if (!func_exit || !func_texit) {
 		LPROFILE_ERROR("Failed to load destroy function");
 		return false;
@@ -420,7 +420,7 @@ string CountUtil::getUsageStr(void)
 			"\t\tmonitored. It follows the same syntax as Perf.\n"
 			"\t\tYou can use the command 'perf list' of Perf to\n"
 			"\t\tcheck supported events in your environment.\n"
-			"\t\tDefault is 'cpu-cycles'\n".
+			"\t\tDefault is 'cpu-cycles'\n"
 			"\t-l <log_file>\n"
 			"\t\tDefine the prefix of the log file. The actual\n"
 			"\t\tlog file is per-thread, named as the form of\n"
@@ -485,11 +485,11 @@ void CountUtil::buildInitArgs(vector<BPatch_snippet *> &args)
 {
 	if (evlist.size() == 0)
 		evlist = EVLIST_DEF;
-	args.push_back(new BPatch_constExpr(evlist));
+	args.push_back(new BPatch_constExpr(evlist.c_str()));
 
 	if (logfile.size() == 0)
 		logfile = LOGFILE_DEF;
-	args.push_back(new BPatch_constExpr(logfile));
+	args.push_back(new BPatch_constExpr(logfile.c_str()));
 
 	calculateRange();
 
@@ -528,7 +528,7 @@ SymtabAPI::Symbol *CountUtil::findHookSymbol(BPatch_function *func_wrap, string 
 	return NULL;
 }
 
-bool CountUtil::wrapFunction(string funcstr)
+bool CountUtil::wrapFunction(string funcstr, BPatch_function *__wrap)
 {
 	BPatch_function *func_orig = NULL, *func_wrap = NULL;
 	BPatch_Vector<BPatch_function *> tfuncs;
@@ -536,21 +536,31 @@ bool CountUtil::wrapFunction(string funcstr)
 	SymtabAPI::Symbol *hooksym = NULL;
 	BPatch_Vector<BPatch_object *> tmods;
 
+	LPROFILE_INFO("wrap function %s", funcstr.c_str());
+
 	as->getImage()->findFunction(tmp.c_str(), tfuncs);
 	if (tfuncs.size() == 0) {
 		LPROFILE_ERROR("Func %s is not found", tmp.c_str());
 		return false;
 	}
+	for (size_t i = 0; i < tfuncs.size(); i++) {
+		LPROFILE_INFO("Find function %s", tfuncs[i]->getName().c_str());
+	}
 	func_orig = tfuncs[0];
 
-	tmp = "^lprobe_" + funcstr;
-	tfuncs.clear();
-	libcnt->findFunction(tmp.c_str(), tfuncs);
-	if (tfuncs.size() == 0) {
-		LPROFILE_ERROR("Func %s is not found", tmp.c_str());
-		return false;
+	if (__wrap == NULL) {
+		tmp = "^lprobe_" + funcstr;
+		tfuncs.clear();
+		libcnt->findFunction(tmp.c_str(), tfuncs);
+		if (tfuncs.size() == 0) {
+			LPROFILE_ERROR("Func %s is not found", tmp.c_str());
+			return false;
+		}
+		func_wrap = tfuncs[0];
 	}
-	func_wrap = tfuncs[0];
+	else {
+		func_wrap = __wrap;
+	}
 
 	hooksym = findHookSymbol(func_wrap, funcstr);
 	if (!hooksym) {
@@ -563,6 +573,92 @@ bool CountUtil::wrapFunction(string funcstr)
 
 	if (!as->wrapDynFunction(func_orig, func_wrap, hooksym, tmods)) {
 		LPROFILE_ERROR("Failed to wrap function %s", funcstr.c_str());
+		return false;
+	}
+	return true;
+}
+
+#define LIBPTHREAD_NAME "libpthread"
+
+uint32_t CountUtil::findTIDOffset(void)
+{
+	BPatch_Vector<BPatch_object *> allobjs;
+	BPatch_object *objpthread = NULL;
+	BPatch_type *pthread_type = NULL;
+
+	as->getImage()->getObjects(allobjs);
+	for (unsigned i = 0; i < allobjs.size(); i++) {
+		objpthread = allobjs[i];
+		if (objpthread->name().compare(0, strlen(LIBPTHREAD_NAME), LIBPTHREAD_NAME)) {
+			objpthread = NULL;
+			continue;
+		}
+		else
+			break;
+	}
+
+	if (!objpthread) {
+		LPROFILE_INFO("No libpthread.so is found");
+		return UINT32_MAX;
+	}
+
+	pthread_type = as->getImage()->findType("pthread");
+	if (!pthread_type) {
+		LPROFILE_INFO("Failed to find struct pthread in libpthread.so");
+		return UINT32_MAX;
+	}
+	LPROFILE_INFO("Find pthread, type %u, size %u",
+					pthread_type->getDataClass(), pthread_type->getSize());
+
+	BPatch_Vector<BPatch_field *> *fields = pthread_type->getComponents();
+
+	if (fields) {
+		uint32_t offset = 0;
+		for (unsigned i = 0; i < (*fields).size(); i++) {
+			BPatch_field *field = (*fields)[i];
+
+			if (strncmp(field->getName(), "tid", sizeof("tid")) == 0)
+				break;
+
+			LPROFILE_INFO("Field[%u]: %s, size %u, offset %d",
+							i, field->getName(), field->getType()->getSize(),
+							field->getOffset());
+			offset += field->getType()->getSize();
+		}
+		LPROFILE_INFO("tid offset: %u", offset);
+		return offset;
+	}
+
+	return UINT32_MAX;
+}
+
+bool CountUtil::wrapPthreadFunc(void)
+{
+	uint32_t offset = UINT32_MAX;
+
+	offset = findTIDOffset();
+	if (offset == UINT32_MAX) {
+		LPROFILE_INFO("Cannot read PID offset in struct pthread, "
+					"pthread_create will not be wrapped.");
+		return true;
+	}
+
+	// write tid offset to libprobe.so
+	vector<BPatch_module *> mods;
+	BPatch_variableExpr *var = NULL;
+
+	libcnt->modules(mods);
+	var = mods[0]->findVariable(LIBTIDOFFSET);
+
+	if (!var) {
+		LPROFILE_ERROR("Failed to find global var %s in %s",
+							LIBTIDOFFSET, LIBCNT);
+		return false;
+	}
+	var->writeValue(&offset);
+
+	if (!wrapFunction("pthread_create", func_tinit)) {
+		LPROFILE_ERROR("Failed to wrap pthread_create");
 		return false;
 	}
 	return true;
