@@ -149,6 +149,17 @@ static void __init_thread(unsigned id)
 		LOG_ERROR("Failed to create evlist");
 		tinfo->state = PROF_STATE_ERROR;
 	}
+
+	// create output file
+	char outfile[64] = {'\0'};
+
+	snprintf(outfile, sizeof(outfile), "prof.%u", tinfo->tid);
+	tinfo->output_file = fopen(outfile, "w");
+	if (tinfo->output_file == NULL) {
+		LOG_ERROR("Failed to open output file %s", outfile);
+		tinfo->state = PROF_STATE_ERROR;
+	}
+	LOG_INFO("Open record file %s", outfile);
 }
 
 void lprobe_thread_init(void *p)
@@ -177,7 +188,7 @@ void lprobe_thread_init(void *p)
 
 int lprobe_pthread_create(void *p1, void *p2, void *p3, void *p4)
 {
-	int ret = NULL;
+	int ret = 0;
 
 	ret = HOOK_pthread_create(p1, p2, p3, p4);
 	if (!ret) {
@@ -316,6 +327,16 @@ void lprobe_pthread_exit(void *p)
 static void __destroy_tinfo(struct prof_tinfo *tinfo)
 {
 	LOG_INFO("Destroy thread data for %d", tinfo->tid);
+	if (tinfo->output_file) {
+		if (tinfo->nb_record > 0) {
+			fwrite(tinfo->records, sizeof(struct prof_record),
+							tinfo->nb_record, tinfo->output_file);
+			LOG_INFO("Write back rest %u records\n", tinfo->nb_record);
+			tinfo->nb_record = 0;
+		}
+		fclose(tinfo->output_file);
+		tinfo->output_file = NULL;
+	}
 	if (tinfo->evlist) {
 		prof_evlist__delete(tinfo->evlist);
 		tinfo->evlist = NULL;
@@ -364,21 +385,23 @@ static void __read_count(unsigned int func_index, uint8_t is_post,
 		count = prof_evsel__rdpmc(evsel);
 		LOG_DEBUG("func[%u], %u, %lu, cyc %llu",
 				func_index, is_post, count, cyc);
-// 		local->records[local->nb_record].func_idx = func_index;
-// 		local->records[local->nb_record].ev_idx = i;
-// 		local->records[local->nb_record].count = prof_evsel__rdpmc(evsel, local->tid);
-// //		local->records[local->nb_record].count = prof_evsel__read(evsel, local->tid);
-// 		i++;
-// 		local->nb_record ++;
-// //		if (local->nb_record == PROF_RECORD_MAX) {
-// //			local->state = PROF_STATE_STOP;
-// //			break;
-// //		}
-// 		if (local->nb_record == PROF_RECORD_CACHE) {
-// //			fwrite(local->records, sizeof(struct prof_record),
-// //							local->nb_record, local->output_file);
-// 			local->nb_record = 0;
-// 		}
+		local->records[local->nb_record].func_idx = func_index;
+		local->records[local->nb_record].ev_idx = i;
+		local->records[local->nb_record].count = count;
+		local->records[local->nb_record].pos = is_post;
+		local->records[local->nb_record].ts = cyc;
+//		local->records[local->nb_record].count = prof_evsel__read(evsel, local->tid);
+		i++;
+		local->nb_record ++;
+//		if (local->nb_record == PROF_RECORD_MAX) {
+//			local->state = PROF_STATE_STOP;
+//			break;
+//		}
+		if (local->nb_record == PROF_RECORD_CACHE) {
+			fwrite(local->records, sizeof(struct prof_record),
+							local->nb_record, local->output_file);
+			local->nb_record = 0;
+		}
 	}
 }
 
@@ -388,7 +411,6 @@ void lprobe_func_entry(unsigned int func_index)
 		return;
 	
 	if (threadinfo == NULL) {
-		LOG_DEBUG("First enter");
 		threadid = syscall(__NR_gettid);
 		threadinfo = __find_tinfo(threadid);
 		if (threadinfo == NULL) {
@@ -423,7 +445,7 @@ void lprobe_func_exit(unsigned int func_index)
 	}
 	if (threadinfo->state != PROF_STATE_RUNNING)
 		return;
-	LOG_INFO("FUNC %u exit", func_index);
+	// LOG_INFO("FUNC %u exit", func_index);
 	__read_count(func_index, 1, threadinfo);
 }
 

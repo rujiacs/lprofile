@@ -8,7 +8,7 @@ extern "C" {
 #include <pthread.h>
 #include "list.h"
 
-#define PF_DEBUG
+// #define PF_DEBUG
 
 #define PROF_EVENT_MAX	10
 #define PROF_THREAD_MAX	64
@@ -29,7 +29,11 @@ struct prof_func {
 
 #define PROF_RECORD_MAX	(1 << 22)
 struct prof_record {
+	uint64_t ts;
 	uint16_t func_idx;
+#define PROF_RECORD_POS_PRE 0
+#define PROF_RECORD_POS_POST 1
+	uint8_t pos;
 	uint8_t ev_idx;
 	uint64_t count;
 };
@@ -54,8 +58,7 @@ struct prof_tinfo {
 	struct prof_func *func_counters;
 
 	uint32_t nb_record;
-	// struct prof_record records[PROF_RECORD_CACHE];
-	struct prof_record *records;
+	struct prof_record records[PROF_RECORD_CACHE];
 };
 
 struct prof_info {

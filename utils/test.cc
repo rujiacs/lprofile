@@ -9,6 +9,8 @@
 #include "wrap.h"
 #include "simple.h"
 #include "replace.h"
+#include "report.h"
+#include "tracer.h"
 #include "test.h"
 
 #include "BPatch.h"
@@ -53,10 +55,20 @@ static struct testcmd cmds[TEST_MODE_NUM] = {
 		.construct = ReplaceTest::construct,
 		.usage = ReplaceTest::staticUsage,
 	},
+	[TEST_MODE_REPORT] = {
+		.cmd = REPORT_CMD,
+		.construct = ReportTest::construct,
+		.usage = ReportTest::staticUsage,
+	},
 	[TEST_MODE_SIMPLE] = {
 		.cmd = SIMPLE_CMD,
 		.construct = SimpleTest::construct,
 		.usage = SimpleTest::staticUsage,
+	},
+	[TEST_MODE_TRACER] = {
+		.cmd = TRACER_CMD,
+		.construct = TracerTest::construct,
+		.usage = TracerTest::staticUsage,
 	},
 //	[TEST_MODE_EDIT] = {
 //		.cmd = EDIT_CMD,

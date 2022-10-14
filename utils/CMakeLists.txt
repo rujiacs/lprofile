@@ -39,7 +39,9 @@ set(LPROFILE_SRC
 		prof.cc
 		simple.cc
 		replace.cc
+		report.cc
 		test.cc
+		tracer.cc
 		wrap.cc
 )
 

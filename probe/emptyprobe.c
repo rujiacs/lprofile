@@ -49,7 +49,7 @@ void lprobe_thread_exit_empty(void)
 
 int lprobe_empty_pthread_create(void *p1, void *p2, void *p3, void *p4)
 {
-	int ret = NULL;
+	int ret = 0;
 
 	ret = HOOK_pthread_create(p1, p2, p3, p4);
 	if (!ret) {

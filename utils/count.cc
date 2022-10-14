@@ -25,8 +25,8 @@ TargetFunc::TargetFunc(void) :
 {
 }
 
-TargetFunc::TargetFunc(BPatch_function *f, unsigned int i, string e) :
-		func(f), index(i), elf(e)
+TargetFunc::TargetFunc(BPatch_function *f, unsigned int i, string e, bool b) :
+		func(f), index(i), elf(e), is_user(b)
 {
 }
 
@@ -60,7 +60,17 @@ bool CountUtil::getTargetFuncs(bool is_wrap)
 	return true;
 }
 
-void CountUtil::addTargetFunc(BPatch_function *func, unsigned idx, std::string obj)
+void CountUtil::clearSnippet()
+{
+	size_t i = 0;
+
+	for (i = 0; i < target_funcs.size(); i++) {
+		target_funcs[i].func->removeInstrumentation(false);
+	}
+}
+
+void CountUtil::addTargetFunc(BPatch_function *func, unsigned idx,
+		std::string obj, bool user)
 {
 	elfmap_t::iterator it;
 
@@ -74,7 +84,7 @@ void CountUtil::addTargetFunc(BPatch_function *func, unsigned idx, std::string o
 		LPROFILE_DEBUG("new target elf %s", obj.c_str());
 	}
 
-	target_funcs.push_back(TargetFunc(func, idx, obj));
+	target_funcs.push_back(TargetFunc(func, idx, obj, user));
 	it->second.push_back(target_funcs.size() - 1);
 }
 
@@ -116,7 +126,7 @@ void CountUtil::matchFunc(BPatch_object *obj,
 			continue;
 		}
 
-		addTargetFunc(tfuncs[j], index, obj->name());
+		addTargetFunc(tfuncs[j], index, obj->name(), true);
 	}
 
 	elfmap_t::iterator it;
@@ -204,6 +214,9 @@ bool CountUtil::insertCount(void)
 		TargetFunc *tf = &target_funcs[i];
 		vector<BPatch_point *> *pentry = NULL, *pexit = NULL;
 		BPatchSnippetHandle *handle = NULL;
+
+		if (!tf->is_user)
+			continue;
 
 		if (tf->index == UINT_MAX)
 			continue;

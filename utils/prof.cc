@@ -211,7 +211,7 @@ bool ProfTest::insertExit(void)
 		}
 
 		count.addTargetFunc(funcs[i], UINT_MAX,
-								mod->getObject()->name().c_str());
+								mod->getObject()->name().c_str(), false);
 		break;
 	}
 	return true;
@@ -273,7 +273,7 @@ bool ProfTest::insertInit(void)
 				goto free_arg;
 			}
 			count.addTargetFunc(funcs[i], UINT_MAX,
-								mod->getObject()->name().c_str());
+								mod->getObject()->name().c_str(), false);
 			break;
 		}
 	}
@@ -300,6 +300,12 @@ bool ProfTest::process(void)
 		return false;
 	}
 
+	// insert counter
+	if (!count.insertCount()) {
+		LPROFILE_ERROR("Failed to insert counting functions");
+		return false;
+	}
+
 	// insert exit function
 	if (!insertExit()) {
 		LPROFILE_ERROR("Failed to insert exit function");
@@ -308,12 +314,6 @@ bool ProfTest::process(void)
 
 	if (!count.wrapPthreadFunc()) {
 		LPROFILE_ERROR("Failed to wrap pthread functions");
-		return false;
-	}
-
-	// insert counter
-	if (!count.insertCount()) {
-		LPROFILE_ERROR("Failed to insert counting functions");
 		return false;
 	}
 

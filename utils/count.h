@@ -52,9 +52,11 @@ class TargetFunc{
 		BPatch_function *func;
 		unsigned int index;
 		std::string elf;
+		bool is_user;
 
 		TargetFunc(void);
-		TargetFunc(BPatch_function *, unsigned int, std::string elfname);
+		TargetFunc(BPatch_function *, unsigned int,
+						std::string elfname, bool user);
 };
 
 typedef std::vector<size_t> funclist_t;
@@ -126,7 +128,8 @@ class CountUtil {
 		/* Get the list of target functions. */
 		bool getTargetFuncs(bool is_wrap = false);
 		/* Add target function to the list */
-		void addTargetFunc(BPatch_function *func, unsigned idx, std::string obj);
+		void addTargetFunc(BPatch_function *func, unsigned idx,
+				std::string obj, bool user);
 
 		/* Insert counting functions into target functions */
 		bool insertCount(void);
@@ -144,6 +147,8 @@ class CountUtil {
 		bool wrapFunction(std::string funcstr, BPatch_function *__wrap = NULL);
 
 		bool wrapPthreadFunc(void);
+
+		void clearSnippet(void);
 	private:
 		/* Get all objects and filter out system libraries and
 		 * dyninst libraries */

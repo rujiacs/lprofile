@@ -10,7 +10,7 @@
 ** Description: interchanges the contents of a and b.
 ** Returns    : nothing
 ***************************************************************************/
-void interchange(int *a, int *b)
+static inline void interchange(int *a, int *b)
 {
     /* interchanges the contents of the two variables containing integers. */
     int temp; 
